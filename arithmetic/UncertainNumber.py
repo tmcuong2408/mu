@@ -348,12 +348,24 @@ def epw(fn: Callable, *args: Any) -> UncertainNumber:
 def m(fn: Callable, *args: Any) -> UncertainNumber:
     """
     Minkowski Space (o)_m functional operator for lambdas with UncertainNumber parameters.
-    Evaluates independent Cartesian scenarios across all inputs.
+    Evaluates algebraic operations across independent Minkowski scenarios.
     """
     if not args:
         return UncertainNumber({fn()})
 
     unc_args = [_to_unc(a) for a in args]
+
+    # Try evaluating with UncertainNumber instances directly to leverage overloaded Minkowski operators
+    try:
+        res = fn(*unc_args)
+        if isinstance(res, UncertainNumber):
+            return res
+        elif isinstance(res, (int, float, complex, set, list, tuple)):
+            return _to_unc(res)
+    except Exception:
+        pass
+
+    # Fallback to Cartesian scalar evaluation across all input scenarios
     new_d = sum((u.d for u in unc_args), ())
 
     def generative_fn(idx_tuple: Any) -> Numeric:
