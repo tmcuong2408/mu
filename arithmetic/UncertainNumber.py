@@ -48,16 +48,23 @@ class UncertainNumber:
         2. From pure Canonical Form: Generative function 'f' and index domain tuple 'd' representing sizes.
         """
         if data is not None:
-            # Sort input values to establish a deterministic 1-based index mapping
-            y_values = sorted(list(data))
+            data_list = list(data)
+            try:
+                y_values = sorted(data_list)
+            except Exception:
+                y_values = data_list
             n = len(y_values)
 
             # 'd' is a tuple containing the maximum index size: d = (n,)
             self.d: Tuple[int, ...] = (n,)
+            self.elements = y_values
 
-            # Construct pure generative function f_X via Lagrange Interpolation
-            x_nodes = list(range(1, n + 1))
-            self.f: Callable[[Numeric], Numeric] = lagrange_interpolation(x_nodes, y_values)
+            is_numeric = all(isinstance(v, (int, float, complex)) and not isinstance(v, bool) for v in y_values)
+            if is_numeric and n > 0:
+                x_nodes = list(range(1, n + 1))
+                self.f: Callable[[Numeric], Numeric] = lagrange_interpolation(x_nodes, y_values)
+            else:
+                self.f = lambda idx: self.elements[int(idx[0] if isinstance(idx, tuple) else idx) - 1] if self.elements and 1 <= int(idx[0] if isinstance(idx, tuple) else idx) <= len(self.elements) else None
             self.ast: dict = {"type": "leaf"}
 
         elif generative_fn is not None or index_domain is not None or ast_node is not None:
@@ -71,7 +78,7 @@ class UncertainNumber:
                 "Must provide either raw numeric data OR a generative function 'f' with index domain tuple 'd'."
             )
 
-    def evaluate_at_index(self, index_key: Any) -> Numeric:
+    def evaluate_at_index(self, index_key: Any) -> Any:
         """
         Evaluates the generative function f_X at a specific index key or index tuple.
         Recursively traverses AST node connections.
@@ -115,11 +122,14 @@ class UncertainNumber:
 
         return self.f(index_key[0] if len(index_key) == 1 else index_key)
 
-    def to_set(self) -> Set[Numeric]:
+    def to_set(self) -> Set[Any]:
         """
         Executes Lazy Evaluation: Generates candidate index ranges (1..n_i) from tuple 'd'
         and evaluates connected AST nodes to output the final outcome set.
         """
+        if self.d == (0,) or (self.ast.get("type") == "leaf" and hasattr(self, "elements") and not self.elements):
+            return set()
+
         # Generate 1-based index ranges for each dimension represented in tuple 'd'
         index_ranges = [range(1, n + 1) for n in self.d]
         
@@ -128,6 +138,8 @@ class UncertainNumber:
         for idx in itertools.product(*index_ranges):
             try:
                 val = self.evaluate_at_index(idx)
+                if val is None:
+                    continue
                 if isinstance(val, float):
                     val = round(val, 10)
                     if val.is_integer():
@@ -177,12 +189,56 @@ class UncertainNumber:
         )
         return res
 
+    def to_set_key(self) -> tuple:
+        """Returns a hashable tuple representation of its set values."""
+        try:
+            s = self.to_set()
+            formatted_elems = []
+            for elem in s:
+                if isinstance(elem, UncertainNumber):
+                    formatted_elems.append(elem.to_set_key())
+                else:
+                    formatted_elems.append(elem)
+            return tuple(sorted(formatted_elems, key=lambda x: str(x)))
+        except Exception:
+            return (id(self),)
+
+    def __hash__(self):
+        return hash(self.to_set_key())
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, UncertainNumber):
+            return self.to_set_key() == other.to_set_key()
+        return False
+
+    def __lt__(self, other: Any) -> bool:
+        if isinstance(other, UncertainNumber):
+            return str(self) < str(other)
+        return False
+
     def __mul__(self, other: Any) -> "UncertainNumber":
         """Overloads '*' to act as an abstract AST composition operator."""
         return self.compose(other)
 
     def __repr__(self):
-        return f"UncertainNumber(d={self.d}, ast_type='{self.ast['type']}')"
+        try:
+            s = self.to_set()
+            if not s:
+                return "{}_u"
+            sorted_items = sorted(
+                list(s),
+                key=lambda x: (
+                    1 if isinstance(x, UncertainNumber) else 0,
+                    x.to_set_key() if isinstance(x, UncertainNumber) else x,
+                ),
+            )
+            inner = ", ".join(repr(x) if isinstance(x, UncertainNumber) else str(x) for x in sorted_items)
+            return f"{{{inner}}}_u"
+        except Exception:
+            return f"UncertainNumber(d={self.d})"
+
+    def __str__(self):
+        return self.__repr__()
 
     # ==================== FUNCTIONAL SPACE OPERATORS (LAMBDAS) ====================
 
