@@ -43,12 +43,7 @@ Mathematics of Uncertrainty
 <p>
   <b>Keywords:</b> <i>Mathematics of Uncertainty, Interval Arithmetic, Canonical Form, Lazy Evaluation, Scenario Index Domain, Weak Binary Relation, Uncertain Calculus, Python Library.</i>[cite: 1]
 </p>
-
-<<<<<<< HEAD
-
-=======
->>>>>>> 392ad7a (fix bugs in em arithmetic space)
-  ```python
+''''python
 from arithmetic import UncertainNumber, Arithmetic
 from arithmetic import pw, epw, m, em
 
@@ -80,12 +75,6 @@ print(f"(0.5 * {{2, 3, 4}})_em = {res_em_half}")
 f_pw = pw(lambda x: x**2 + 5*x + 6, X)
 print(f"pw(lambda x: x^2 + 5x + 6, X) = {f_pw}")
 
-<<<<<<< HEAD
-  # Extended Pointwise với lambda:
-  res_epw_fn = epw(lambda x, c: x * c, X, 10)
-  print(f"epw(lambda x, c: x * c, X, 10) = {sorted(list(res_epw_fn.to_set()))}")
-  ```
-=======
 # Triệt tiêu rác số học: f(x) = x - x
 zero_pw = pw(lambda x: x - x, X)
 print(f"pw(lambda x: x - x, X) = {zero_pw}")
@@ -110,4 +99,3 @@ print(f"(0.5 * {{1, 5, 6, 7, 25, 30, 35, 36, 42, 49}})_em = {res_em_add_none} (V
 
 res_em_pow = Arithmetic.pow(X_custom, 0.5, space="em")
 print(f"({{1, 5, 6, 7, 25, 30, 35, 36, 42, 49}}^0.5)_em = {res_em_pow}")
->>>>>>> 392ad7a (fix bugs in em arithmetic space)
