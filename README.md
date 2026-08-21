@@ -44,7 +44,7 @@ Mathematics of Uncertrainty
   <b>Keywords:</b> <i>Mathematics of Uncertainty, Interval Arithmetic, Canonical Form, Lazy Evaluation, Scenario Index Domain, Weak Binary Relation, Uncertain Calculus, Python Library.</i>[cite: 1]
 </p>
 
-<p>
+
   ```python
   from arithmetic import UncertainNumber, Arithmetic
   from arithmetic import pw, epw, m, em
@@ -89,4 +89,3 @@ Mathematics of Uncertrainty
   res_epw_fn = epw(lambda x, c: x * c, X, 10)
   print(f"epw(lambda x, c: x * c, X, 10) = {sorted(list(res_epw_fn.to_set()))}")
   ```
-</p>
