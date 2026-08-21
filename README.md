@@ -43,7 +43,8 @@ Mathematics of Uncertrainty
 <p>
   <b>Keywords:</b> <i>Mathematics of Uncertainty, Interval Arithmetic, Canonical Form, Lazy Evaluation, Scenario Index Domain, Weak Binary Relation, Uncertain Calculus, Python Library.</i>[cite: 1]
 </p>
-<pre><code class="language-python">
+
+```python
 from arithmetic import UncertainNumber, Arithmetic
 from arithmetic import pw, epw, m, em
 
@@ -99,5 +100,3 @@ print(f"(0.5 * {{1, 5, 6, 7, 25, 30, 35, 36, 42, 49}})_em = {res_em_add_none} (V
 
 res_em_pow = Arithmetic.pow(X_custom, 0.5, space="em")
 print(f"({{1, 5, 6, 7, 25, 30, 35, 36, 42, 49}}^0.5)_em = {res_em_pow}")
-
-</code></pre>
