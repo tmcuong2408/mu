@@ -38,6 +38,7 @@ class Arithmetic:
         b: Any,
         operator_fn: Callable[[Numeric, Numeric], Numeric],
         space: str = "m",
+        operator_symbol: str = "+",
     ) -> UncertainNumber:
         """
         Dispatches operation execution to the designated Arithmetic Space Engine.
@@ -51,7 +52,7 @@ class Arithmetic:
         elif space_key == "epw":
             return EPointwiseArithmetic.epw(a_unc, b_unc, operator_fn)
         elif space_key == "m":
-            return MinkowskiArithmetic.m(a_unc, b_unc, operator_fn)
+            return MinkowskiArithmetic.m(a_unc, b_unc, operator_fn, operator_symbol=operator_symbol)
         elif space_key == "em":
             return EMinkowskiArithmetic.em(a_unc, b_unc, operator_fn)
         else:
@@ -63,35 +64,35 @@ class Arithmetic:
 
     @classmethod
     def add(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x + y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x + y, space=space, operator_symbol="+")
 
     @classmethod
     def sub(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x - y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x - y, space=space, operator_symbol="-")
 
     @classmethod
     def mul(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x * y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x * y, space=space, operator_symbol="*")
 
     @classmethod
     def truediv(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x / y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x / y, space=space, operator_symbol="/")
 
     @classmethod
     def floordiv(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x // y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x // y, space=space, operator_symbol="//")
 
     @classmethod
     def pow(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x ** y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x ** y, space=space, operator_symbol="**")
 
     @classmethod
     def mod(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, b, lambda x, y: x % y, space=space)
+        return cls._dispatch(a, b, lambda x, y: x % y, space=space, operator_symbol="%")
 
     @classmethod
     def neg(cls, a: Any, space: str = "m") -> UncertainNumber:
-        return cls._dispatch(a, UncertainNumber({-1}), lambda x, y: x * y, space=space)
+        return cls._dispatch(a, UncertainNumber({-1}), lambda x, y: x * y, space=space, operator_symbol="*")
 
     @classmethod
     def pos(cls, a: Any, space: str = "m") -> UncertainNumber:

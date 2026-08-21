@@ -17,6 +17,7 @@ class MinkowskiArithmetic:
         left: UncertainNumber,
         right: UncertainNumber,
         operator_fn: Callable[[Numeric, Numeric], Numeric],
+        operator_symbol: str = "+",
     ) -> UncertainNumber:
         """
         Connects two AST nodes in Minkowski Space (o)_m[cite: 1].
@@ -29,6 +30,7 @@ class MinkowskiArithmetic:
             "left": left,
             "right": right,
             "operator_fn": operator_fn,
+            "operator_symbol": operator_symbol,
             "space_type": "minkowski",
         }
 

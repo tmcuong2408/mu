@@ -49,30 +49,106 @@ class UncertainNumber:
         2. From pure Canonical Form: Generative function 'f' and index domain tuple 'd' representing sizes.
         """
         if data is not None:
-            data_list = list(data)
-            try:
-                y_values = sorted(data_list)
-            except Exception:
-                y_values = data_list
-            n = len(y_values)
+            if isinstance(data, range):
+                n = len(data)
+                self.d: Tuple[int, ...] = (n,)
+                self.elements = data
+                if n == 0:
+                    self.f = lambda x: None
+                    self._formula_template = lambda v: "0"
+                elif n == 1:
+                    v = data[0]
+                    self.f = lambda x: v
+                    self._formula_template = lambda v: f"{v}"
+                else:
+                    start = data[0]
+                    step = data.step
+                    # Đơn thức bậc nhất O(1): f(x) = start + (x - 1) * step
+                    self.f = lambda x: start + ((x[0] if isinstance(x, tuple) else x) - 1) * step
+                    if step == 1 and start == 1:
+                        self._formula_template = lambda v: f"{v}"
+                    elif step == 1 and start == 0:
+                        self._formula_template = lambda v: f"{v} - 1"
+                    elif step == 1:
+                        self._formula_template = lambda v: f"{start - 1} + {v}" if start > 1 else f"{v} - {1 - start}"
+                    else:
+                        self._formula_template = lambda v: f"{start} + ({v} - 1) * {step}"
+                self.ast: dict = {"type": "leaf"}
 
-            # 'd' is a tuple containing the maximum index size: d = (n,)
-            self.d: Tuple[int, ...] = (n,)
-            self.elements = y_values
-
-            is_numeric = all(isinstance(v, (int, float, complex)) and not isinstance(v, bool) for v in y_values)
-            if is_numeric and n > 0:
-                x_nodes = list(range(1, n + 1))
-                self.f: Callable[[Numeric], Numeric] = lagrange_interpolation(x_nodes, y_values)
             else:
-                self.f = lambda idx: self.elements[int(idx[0] if isinstance(idx, tuple) else idx) - 1] if self.elements and 1 <= int(idx[0] if isinstance(idx, tuple) else idx) <= len(self.elements) else None
-            self.ast: dict = {"type": "leaf"}
+                data_list = list(data)
+                try:
+                    y_values = sorted(data_list)
+                except Exception:
+                    y_values = data_list
+                n = len(y_values)
+
+                # 'd' is a tuple containing the maximum index size: d = (n,)
+                self.d: Tuple[int, ...] = (n,)
+                self.elements = y_values
+
+                is_numeric = all(isinstance(v, (int, float, complex)) and not isinstance(v, bool) for v in y_values)
+                if is_numeric and n > 0:
+                    if n == 1:
+                        v = y_values[0]
+                        self.f = lambda x: v
+                        self._formula_template = lambda v: f"{v}"
+                    else:
+                        # Kiểm tra cấp số cộng để dùng đơn thức bậc nhất f(x) = a*x + b (O(1))
+                        step = (y_values[-1] - y_values[0]) / (n - 1)
+                        is_arithmetic = False
+                        if n <= 100:
+                            is_arithmetic = all(abs(y_values[i] - (y_values[0] + i * step)) < 1e-9 for i in range(n))
+                        else:
+                            is_arithmetic = (
+                                abs(y_values[1] - (y_values[0] + step)) < 1e-9 and
+                                abs(y_values[n // 2] - (y_values[0] + (n // 2) * step)) < 1e-9 and
+                                abs(y_values[-1] - (y_values[0] + (n - 1) * step)) < 1e-9
+                            )
+
+                        if is_arithmetic:
+                            y0 = y_values[0]
+                            # Đơn thức bậc nhất: f(x) = y0 + (x - 1) * step
+                            self.f = lambda x: y0 + ((x[0] if isinstance(x, tuple) else x) - 1) * step
+                            if step == 1 and y0 == 1:
+                                self._formula_template = lambda v: f"{v}"
+                            elif step == 1 and y0 == 0:
+                                self._formula_template = lambda v: f"{v} - 1"
+                            elif step == 1:
+                                self._formula_template = lambda v: f"{y0 - 1} + {v}" if y0 > 1 else f"{v} - {1 - y0}"
+                            else:
+                                self._formula_template = lambda v: f"{y0} + ({v} - 1) * {step}"
+                        elif n <= 10:
+                            # Lagrange cho tập nhỏ
+                            x_nodes = list(range(1, n + 1))
+                            self.f = lagrange_interpolation(x_nodes, y_values)
+                            self._formula_template = lambda v: f"LagrangePoly({v})"
+                        else:
+                            # Tra cứu mảng O(1) và nội suy tuyến tính từng đoạn
+                            def _fast_eval(x: Numeric) -> Numeric:
+                                idx_val = x[0] if isinstance(x, tuple) else x
+                                if isinstance(idx_val, (int, float)) and 1 <= idx_val <= n:
+                                    if isinstance(idx_val, int) or idx_val.is_integer():
+                                        return y_values[int(idx_val) - 1]
+                                    x_int = int(idx_val)
+                                    if x_int == n:
+                                        return y_values[-1]
+                                    frac = idx_val - x_int
+                                    return y_values[x_int - 1] * (1 - frac) + y_values[x_int] * frac
+                                return None
+                            self.f = _fast_eval
+                            self._formula_template = lambda v: f"PiecewiseLinear({v})"
+                else:
+                    self.f = lambda idx: self.elements[int(idx[0] if isinstance(idx, tuple) else idx) - 1] if self.elements and 1 <= int(idx[0] if isinstance(idx, tuple) else idx) <= len(self.elements) else None
+                    self._formula_template = lambda v: f"DiscreteLookup({v})"
+                self.ast: dict = {"type": "leaf"}
 
         elif generative_fn is not None or index_domain is not None or ast_node is not None:
             # Pure Canonical Form initialization with index domain size tuple (f, d)
             self.d = tuple(index_domain) if index_domain is not None else ()
             self.ast = ast_node if ast_node is not None else {"type": "custom_fn"}
             self.f = generative_fn if generative_fn is not None else (lambda idx: self.evaluate_at_index(idx))
+            self._formula_template = None
 
         else:
             raise ValueError(
@@ -293,6 +369,60 @@ class UncertainNumber:
             return [self[i] for i in range(start, stop, step)]
         else:
             raise TypeError(f"UncertainNumber indices must be integers or tuples, not {type(index).__name__}")
+
+    def get_formula(self, var_names: Union[List[str], Tuple[str, ...], None] = None) -> str:
+        """
+        Returns the symbolic mathematical formula f(x_1, x_2, ...) of the generative function.
+        """
+        num_vars = len(self.d) if self.d and self.d != (0,) else 1
+        if var_names is None:
+            if num_vars == 1:
+                var_names = ["x"]
+            else:
+                var_names = [f"x_{i + 1}" for i in range(num_vars)]
+
+        if self.ast.get("type") in ("leaf", "custom_fn"):
+            if hasattr(self, "_formula_template") and self._formula_template is not None:
+                v = var_names[0] if var_names else "x"
+                return self._formula_template(v)
+            elif hasattr(self, "elements") and len(self.elements) == 1:
+                return str(self.elements[0])
+            else:
+                v_str = ", ".join(var_names) if var_names else "x"
+                return f"f({v_str})"
+
+        elif self.ast.get("type") == "op":
+            left: "UncertainNumber" = self.ast["left"]
+            right: "UncertainNumber" = self.ast["right"]
+            op_sym = self.ast.get("operator_symbol", "+")
+            space_type = self.ast.get("space_type", "minkowski")
+
+            if space_type == "pointwise":
+                left_vars = var_names
+                right_vars = var_names
+            else:
+                left_dim = len(left.d) if left.d and left.d != (0,) else 1
+                left_vars = var_names[:left_dim]
+                right_vars = var_names[left_dim:]
+
+            left_str = left.get_formula(left_vars)
+            right_str = right.get_formula(right_vars)
+            return f"({left_str}) {op_sym} ({right_str})"
+
+        v_str = ", ".join(var_names) if var_names else "x"
+        return f"f({v_str})"
+
+    @property
+    def formula(self) -> str:
+        """Returns the canonical form formula representation: f(x_1, ...) = ..."""
+        num_vars = len(self.d) if self.d and self.d != (0,) else 1
+        if num_vars == 1:
+            var_names = ["x"]
+            head = "f(x)"
+        else:
+            var_names = [f"x_{i + 1}" for i in range(num_vars)]
+            head = f"f({', '.join(var_names)})"
+        return f"{head} = {self.get_formula(var_names)}"
 
     def __mul__(self, other: Any) -> "UncertainNumber":
         """Overloads '*' to act as an abstract AST composition operator."""
