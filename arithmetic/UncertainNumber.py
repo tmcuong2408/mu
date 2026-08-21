@@ -1,3 +1,4 @@
+import math
 import itertools
 from typing import Callable, Union, List, Tuple, Set, Any
 
@@ -215,6 +216,83 @@ class UncertainNumber:
         if isinstance(other, UncertainNumber):
             return str(self) < str(other)
         return False
+
+    def flat_index_to_tuple(self, flat_idx: int, zero_based: bool = True) -> Tuple[int, ...]:
+        """
+        Converts a 1D linear integer index into a multi-dimensional scenario index tuple
+        corresponding to index domain 'd' = (n_1, n_2, ..., n_k).
+        Time complexity: O(k) (Pure Lazy Evaluation - avoids computing full Cartesian sets).
+        """
+        if not self.d or self.d == (0,):
+            return ()
+
+        total_size = math.prod(self.d)
+        k0 = flat_idx if zero_based else (flat_idx - 1)
+
+        # Support negative indexing (-1 = last element)
+        if k0 < 0:
+            k0 += total_size
+
+        if not (0 <= k0 < total_size):
+            raise IndexError(f"Index {flat_idx} out of range for UncertainNumber with {total_size} scenarios (domain {self.d}).")
+
+        tuple_idx = []
+        # Row-major / odometer decomposition from right to left
+        for dim_size in reversed(self.d):
+            if dim_size <= 0:
+                tuple_idx.append(1)
+            else:
+                tuple_idx.append((k0 % dim_size) + 1)
+                k0 //= dim_size
+
+        return tuple(reversed(tuple_idx))
+
+    def tuple_to_flat_index(self, tuple_idx: Tuple[int, ...], zero_based: bool = True) -> int:
+        """
+        Converts a multi-dimensional index tuple (1-based per dimension) into a 1D linear integer index.
+        Time complexity: O(k).
+        """
+        if len(tuple_idx) != len(self.d):
+            raise ValueError(f"Dimension mismatch: expected {len(self.d)} elements, got {len(tuple_idx)}")
+
+        k0 = 0
+        for idx_val, dim_size in zip(tuple_idx, self.d):
+            if not (1 <= idx_val <= dim_size):
+                raise IndexError(f"Index component {idx_val} out of bounds for dimension size {dim_size}")
+            k0 = k0 * dim_size + (idx_val - 1)
+
+        return k0 if zero_based else (k0 + 1)
+
+    def __len__(self) -> int:
+        """Returns the total number of scenarios N = prod(d)."""
+        return math.prod(self.d) if self.d and self.d != (0,) else 0
+
+    def __iter__(self):
+        """Allows direct iteration over the evaluated set elements in sorted order."""
+        return iter(sorted(list(self.to_set())))
+
+    def __getitem__(self, index: Any):
+        """
+        Lazy O(k) scenario indexing:
+        - If int: converts flat index -> multi-dimensional tuple index and evaluates f_X(tuple).
+        - If tuple: evaluates directly at the given index tuple f_X(tuple).
+        """
+        if isinstance(index, tuple):
+            return self.evaluate_at_index(index)
+        elif isinstance(index, int):
+            tuple_idx = self.flat_index_to_tuple(index, zero_based=True)
+            val = self.evaluate_at_index(tuple_idx)
+            if isinstance(val, float):
+                val = round(val, 10)
+                if val.is_integer():
+                    val = int(val)
+            return val
+        elif isinstance(index, slice):
+            total_size = len(self)
+            start, stop, step = index.indices(total_size)
+            return [self[i] for i in range(start, stop, step)]
+        else:
+            raise TypeError(f"UncertainNumber indices must be integers or tuples, not {type(index).__name__}")
 
     def __mul__(self, other: Any) -> "UncertainNumber":
         """Overloads '*' to act as an abstract AST composition operator."""

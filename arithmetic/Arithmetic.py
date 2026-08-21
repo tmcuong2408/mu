@@ -78,6 +78,10 @@ class Arithmetic:
         return cls._dispatch(a, b, lambda x, y: x / y, space=space)
 
     @classmethod
+    def floordiv(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
+        return cls._dispatch(a, b, lambda x, y: x // y, space=space)
+
+    @classmethod
     def pow(cls, a: Any, b: Any, space: str = "m") -> UncertainNumber:
         return cls._dispatch(a, b, lambda x, y: x ** y, space=space)
 
@@ -89,9 +93,22 @@ class Arithmetic:
     def neg(cls, a: Any, space: str = "m") -> UncertainNumber:
         return cls._dispatch(a, UncertainNumber({-1}), lambda x, y: x * y, space=space)
 
+    @classmethod
+    def pos(cls, a: Any, space: str = "m") -> UncertainNumber:
+        return cls._ensure_uncertain(a)
+
+    @classmethod
+    def abs(cls, a: Any, space: str = "m") -> UncertainNumber:
+        unc = cls._ensure_uncertain(a)
+        return UncertainNumber(
+            generative_fn=lambda idx: abs(unc.evaluate_at_index(idx)),
+            index_domain=unc.d,
+            ast_node={"type": "custom_fn", "space_type": "minkowski"},
+        )
+
 
 # ==================== OVERLOAD DEFAULT MAGIC METHODS ====================
-# Default magic operators (+, -, *, /) strictly fall back to Minkowski space 'm'
+# Default magic operators (+, -, *, /, //, %, **) strictly fall back to Minkowski space 'm'
 
 UncertainNumber.__add__ = lambda self, other: Arithmetic.add(self, other, space="m")
 UncertainNumber.__radd__ = lambda self, other: Arithmetic.add(Arithmetic._ensure_uncertain(other), self, space="m")
@@ -105,6 +122,15 @@ UncertainNumber.__rmul__ = lambda self, other: Arithmetic.mul(Arithmetic._ensure
 UncertainNumber.__truediv__ = lambda self, other: Arithmetic.truediv(self, other, space="m")
 UncertainNumber.__rtruediv__ = lambda self, other: Arithmetic.truediv(Arithmetic._ensure_uncertain(other), self, space="m")
 
-UncertainNumber.__pow__ = lambda self, other: Arithmetic.pow(self, other, space="m")
+UncertainNumber.__floordiv__ = lambda self, other: Arithmetic.floordiv(self, other, space="m")
+UncertainNumber.__rfloordiv__ = lambda self, other: Arithmetic.floordiv(Arithmetic._ensure_uncertain(other), self, space="m")
+
 UncertainNumber.__mod__ = lambda self, other: Arithmetic.mod(self, other, space="m")
+UncertainNumber.__rmod__ = lambda self, other: Arithmetic.mod(Arithmetic._ensure_uncertain(other), self, space="m")
+
+UncertainNumber.__pow__ = lambda self, other: Arithmetic.pow(self, other, space="m")
+UncertainNumber.__rpow__ = lambda self, other: Arithmetic.pow(Arithmetic._ensure_uncertain(other), self, space="m")
+
 UncertainNumber.__neg__ = lambda self: Arithmetic.neg(self, space="m")
+UncertainNumber.__pos__ = lambda self: Arithmetic.pos(self, space="m")
+UncertainNumber.__abs__ = lambda self: Arithmetic.abs(self, space="m")
