@@ -3,7 +3,18 @@ Mathematics of Uncertainty
 
 Trần, M. C. (2026). Extended logic and mathematics of uncertainty. <br/>
 https://doi.org/10.5281/zenodo.22041782
+---
 
+## Author & Contact
+
+**Trần Mạnh Cường**  
+*Alumnus, Faculty of Mathematics & Informatics (K11)*  
+*Thai Nguyen University of Science (TNUS), Vietnam*
+
+* **Research Focus:** Mathematics of Uncertainty
+* **Email:** tmcuong2408@gmail.com
+* **Phone:** (+84) 353-237-140
+* **Location:** DJ7 Street, Thoi Hoa, Ho Chi Minh City, Vietnam
 <div align="center">
   <h1>Abstract</h1>
 </div>
