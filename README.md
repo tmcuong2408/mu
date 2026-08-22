@@ -1,5 +1,5 @@
 # MU
-Mathematics of Uncertrainty
+Mathematics of Uncertainty
 
 <div align="center">
   <h1>Abstract</h1>
