@@ -600,6 +600,11 @@ def em(fn: Callable, *args: Any) -> UncertainNumber:
     Extended Minkowski Space (o)_m' functional operator for lambdas.
     Dispatches to Extended Minkowski equation solving engine for scalars,
     or falls back to Cartesian Minkowski evaluation.
+
+    Supports single-argument lambdas that encode scalar multiplication or
+    power operations, e.g.:
+        em(lambda A: 0.5 * A, A)   ->  (1/2 * A)_{m'}
+        em(lambda A: A ** 0.5, A)  ->  (A^{1/2})_{m'}
     """
     if not args:
         return UncertainNumber({fn()})
@@ -611,5 +616,44 @@ def em(fn: Callable, *args: Any) -> UncertainNumber:
         from .EMinkowskiArithmetic import EMinkowskiArithmetic
         if unc_args[0].d == (1,) or unc_args[1].d == (1,):
             return EMinkowskiArithmetic.em(unc_args[0], unc_args[1], fn)
+
+    # Handle single-argument lambdas of the form fn(A) = scalar * A or fn(A) = A ** scalar.
+    # Probe fn with a scalar value to detect the hidden scalar operand.
+    if len(unc_args) == 1:
+        from .EMinkowskiArithmetic import EMinkowskiArithmetic
+        unc_target = unc_args[0]
+        probe = 4.0  # arbitrary non-trivial probe value
+
+        # Detect scalar multiplication: fn(x) = c * x  =>  fn(probe)/probe == constant
+        try:
+            result_mul = fn(probe)
+            if isinstance(result_mul, (int, float)) and probe != 0:
+                scalar_val = result_mul / probe
+                # Verify: fn(probe2) / probe2 == same constant
+                probe2 = 9.0
+                result_mul2 = fn(probe2)
+                if isinstance(result_mul2, (int, float)) and abs(result_mul2 / probe2 - scalar_val) < 1e-9:
+                    # Confirmed: fn is a scalar multiplication by scalar_val
+                    scalar_unc = UncertainNumber({scalar_val})
+                    return EMinkowskiArithmetic.em(scalar_unc, unc_target, lambda x, y: x * y)
+        except Exception:
+            pass
+
+        # Detect power operation: fn(x) = x ** p  =>  log(fn(probe)) / log(probe) == p
+        import math
+        try:
+            result_pow = fn(probe)
+            if isinstance(result_pow, (int, float)) and probe > 0 and result_pow > 0:
+                p_val = math.log(result_pow) / math.log(probe)
+                probe2 = 9.0
+                result_pow2 = fn(probe2)
+                if isinstance(result_pow2, (int, float)) and result_pow2 > 0:
+                    p_val2 = math.log(result_pow2) / math.log(probe2)
+                    if abs(p_val2 - p_val) < 1e-9:
+                        # Confirmed: fn is a power operation x ** p_val
+                        power_unc = UncertainNumber({p_val})
+                        return EMinkowskiArithmetic.em(unc_target, power_unc, lambda x, y: x ** y)
+        except Exception:
+            pass
 
     return m(fn, *unc_args)
