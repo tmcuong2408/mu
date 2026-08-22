@@ -9,7 +9,7 @@ https://doi.org/10.5281/zenodo.22041782
 
 **Trần Mạnh Cường**  
 *Alumnus, Faculty of Mathematics & Informatics (K11)*  
-*Thai Nguyen University of Science (TNUS), Vietnam*
+*Thai Nguyen University of Sciences (TNUS), Vietnam*
 
 * **Research Focus:** Mathematics of Uncertainty
 * **Email:** tmcuong2408@gmail.com
