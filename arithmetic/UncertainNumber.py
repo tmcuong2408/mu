@@ -28,6 +28,105 @@ def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Calla
     return generative_fn
 
 
+def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str = "x") -> str:
+    """
+    Returns a human-readable symbolic string for the Lagrange interpolating polynomial.
+    Expands the polynomial into a sum of coefficient * x^k terms (collected form).
+    """
+    n = len(x_nodes)
+
+    # Represent the polynomial as a list of coefficients [a0, a1, ..., a_{n-1}]
+    # where p(x) = a0 + a1*x + a2*x^2 + ...
+    # We accumulate coefficients via polynomial multiplication.
+
+    def poly_mul(p: List[float], q: List[float]) -> List[float]:
+        """Multiply two polynomials represented as coefficient lists (index = degree)."""
+        result = [0.0] * (len(p) + len(q) - 1)
+        for i, pi in enumerate(p):
+            for j, qj in enumerate(q):
+                result[i + j] += pi * qj
+        return result
+
+    coeffs = [0.0] * n  # accumulated result polynomial
+
+    for i in range(n):
+        xi, yi = x_nodes[i], y_values[i]
+        # Build L_i(x) = product_{j != i} (x - xj) / (xi - xj)
+        li_poly = [1.0]  # start with constant 1
+        denom = 1.0
+        for j in range(n):
+            if i != j:
+                xj = x_nodes[j]
+                # multiply by (x - xj): polynomial [-xj, 1]
+                li_poly = poly_mul(li_poly, [-xj, 1.0])
+                denom *= (xi - xj)
+        # scale by yi / denom
+        scale = yi / denom
+        for k in range(len(li_poly)):
+            if k < n:
+                coeffs[k] += li_poly[k] * scale
+
+    # Round and format coefficients: integers as int, rationals as fraction, else float
+    from fractions import Fraction
+
+    def _fmt(c: float):
+        c = round(c, 9)
+        if abs(c - round(c)) < 1e-9:
+            return int(round(c))
+        # Try to express as a simple fraction (denominator <= 1000)
+        try:
+            frac = Fraction(c).limit_denominator(1000)
+            if abs(float(frac) - c) < 1e-9:
+                return frac  # keeps exact display via str(frac) e.g. "1/3"
+        except Exception:
+            pass
+        return round(c, 6)
+
+    coeffs = [_fmt(c) for c in coeffs]
+
+    # Build human-readable string
+    def _coeff_str(c, with_var: bool) -> str:
+        """Format coefficient for display, wrapping fractions in parens when next to a variable."""
+        from fractions import Fraction
+        if isinstance(c, Fraction):
+            return f"({c})" if with_var else str(c)
+        return str(c)
+
+    terms = []
+    for k in range(n - 1, -1, -1):  # highest degree first
+        c = coeffs[k]
+        if c == 0:
+            continue
+        if k == 0:
+            terms.append(_coeff_str(c, False))
+        elif k == 1:
+            if c == 1:
+                terms.append(var)
+            elif c == -1:
+                terms.append(f"-{var}")
+            else:
+                terms.append(f"{_coeff_str(c, True)}{var}")
+        else:
+            if c == 1:
+                terms.append(f"{var}^{k}")
+            elif c == -1:
+                terms.append(f"-{var}^{k}")
+            else:
+                terms.append(f"{_coeff_str(c, True)}{var}^{k}")
+
+    if not terms:
+        return "0"
+
+    # Join terms, handling sign of subsequent terms
+    result = terms[0]
+    for t in terms[1:]:
+        if t.startswith("-"):
+            result += f" - {t[1:]}"
+        else:
+            result += f" + {t}"
+    return result
+
+
 class UncertainNumber:
     """
     Represents an Uncertain Number U(K) defined strictly via its Canonical Form (f_X, d_X).
@@ -122,7 +221,9 @@ class UncertainNumber:
                             # Lagrange cho tập nhỏ
                             x_nodes = list(range(1, n + 1))
                             self.f = lagrange_interpolation(x_nodes, y_values)
-                            self._formula_template = lambda v: f"LagrangePoly({v})"
+                            # Capture x_nodes/y_values in closure to build symbolic formula
+                            _xn, _yv = x_nodes[:], y_values[:]
+                            self._formula_template = lambda v, xn=_xn, yv=_yv: lagrange_formula_str(xn, yv, v)
                         else:
                             # Tra cứu mảng O(1) và nội suy tuyến tính từng đoạn
                             def _fast_eval(x: Numeric) -> Numeric:
@@ -563,11 +664,19 @@ def m(fn: Callable, *args: Any) -> UncertainNumber:
 
     unc_args = [_to_unc(a) for a in args]
 
-    # Try evaluating with UncertainNumber instances directly to leverage overloaded Minkowski operators
+    # Try evaluating with UncertainNumber instances directly to leverage overloaded Minkowski operators.
+    # IMPORTANT: skip this fast-path if fn merely returns one of its input objects (e.g. max/min
+    # comparing UncertainNumber objects via __lt__ and returning one of them unchanged).  In that
+    # case we must fall through to the Cartesian scalar evaluation so that fn is applied element-wise
+    # to produce {f(a, b) : a ∈ A, b ∈ B}.
     try:
         res = fn(*unc_args)
         if isinstance(res, UncertainNumber):
-            return res
+            # If the result is literally one of the input objects, this fast-path is not appropriate.
+            if any(res is u for u in unc_args):
+                pass  # fall through to Cartesian evaluation below
+            else:
+                return res
         elif isinstance(res, (int, float, complex, set, list, tuple)):
             return _to_unc(res)
     except Exception:
