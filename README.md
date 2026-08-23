@@ -2,8 +2,7 @@
 Mathematics of Uncertainty
 
 Trần, M. C. (2026). Extended logic and mathematics of uncertainty. <br/>
-https://doi.org/10.5281/zenodo.22068756
----
+https://zenodo.org/records/22068802
 
 ## Author & Contact
 
