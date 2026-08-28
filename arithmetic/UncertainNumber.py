@@ -1,9 +1,11 @@
 import math
 import itertools
+import bisect
 from typing import Callable, Union, List, Tuple, Set, Any
 
 # Type alias for numeric types (supporting both Real and Complex numbers)
 Numeric = Union[int, float, complex]
+
 
 
 def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Callable[[Numeric], Numeric]:
@@ -134,6 +136,406 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
         else:
             result += f" + {t}"
     return result
+
+
+def _approx_eq(a: Any, b: Any, rel_tol: float = 1e-7, abs_tol: float = 1e-9) -> bool:
+    """Checks approximate equality for numeric types (int, float, complex)."""
+    if a is None or b is None:
+        return False
+    if isinstance(a, complex) or isinstance(b, complex):
+        ca, cb = complex(a), complex(b)
+        return (
+            math.isclose(ca.real, cb.real, rel_tol=rel_tol, abs_tol=abs_tol)
+            and math.isclose(ca.imag, cb.imag, rel_tol=rel_tol, abs_tol=abs_tol)
+        )
+    try:
+        return math.isclose(float(a), float(b), rel_tol=rel_tol, abs_tol=abs_tol)
+    except Exception:
+        return a == b
+
+
+def _extgcd(a: int, b: int) -> Tuple[int, int, int]:
+    """Extended Euclidean Algorithm returning (x, y, gcd) such that a*x + b*y = gcd."""
+    if b == 0:
+        return 1, 0, a
+    x1, y1, g = _extgcd(b, a % b)
+    return y1, x1 - (a // b) * y1, g
+
+
+def _solve_diophantine_ranges(
+    s_a: int, step_a: int, n_a: int,
+    s_b: int, step_b: int, n_b: int,
+    op: str, target: int
+) -> bool:
+    """
+    Solves linear Diophantine membership for two range arithmetic sequences in O(log(min(step_a, step_b))):
+    a + b = target or a - b = target, where
+    a = s_a + u * step_a (0 <= u < n_a)
+    b = s_b + v * step_b (0 <= v < n_b)
+    """
+    if op == "+":
+        rem = target - s_a - s_b
+        sb = step_b
+    elif op == "-":
+        rem = target - s_a + s_b
+        sb = -step_b
+    else:
+        return False
+
+    a = step_a
+    b = sb
+
+    if b < 0:
+        b_abs = -b
+        x1, y1, g = _extgcd(a, b_abs)
+        if rem % g != 0:
+            return False
+        scale = rem // g
+        a_p = a // g
+        b_p = b_abs // g
+        u0 = x1 * scale
+        v0 = -y1 * scale
+        k_min = max(math.ceil(-u0 / b_p), math.ceil(-v0 / a_p))
+        k_max = min(math.floor((n_a - 1 - u0) / b_p), math.floor((n_b - 1 - v0) / a_p))
+        return k_min <= k_max
+    else:
+        x1, y1, g = _extgcd(a, b)
+        if rem % g != 0:
+            return False
+        scale = rem // g
+        a_p = a // g
+        b_p = b // g
+        u0 = x1 * scale
+        v0 = y1 * scale
+        k_min = max(math.ceil(-u0 / b_p), math.ceil((v0 - (n_b - 1)) / a_p))
+        k_max = min(math.floor((n_a - 1 - u0) / b_p), math.floor(v0 / a_p))
+        return k_min <= k_max
+
+
+def _get_leaf_linear_params(unc: "UncertainNumber") -> Union[Tuple[Numeric, Numeric, int], None]:
+    """Extracts (start, step, count) if the leaf represents an exact linear arithmetic progression."""
+    if unc.ast.get("type") != "leaf":
+        return None
+    if isinstance(getattr(unc, "elements", None), range):
+        r = unc.elements
+        return (r.start, r.step, len(r))
+    if hasattr(unc, "elements") and unc.elements is not None:
+        elems = unc.elements
+        n = len(elems)
+        if n == 0:
+            return None
+        if n == 1:
+            return (elems[0], 0, 1)
+        if all(isinstance(x, (int, float)) for x in elems):
+            step = (elems[-1] - elems[0]) / (n - 1)
+            if all(abs(elems[i] - (elems[0] + i * step)) < 1e-9 for i in range(n)):
+                return (elems[0], step, n)
+    if unc.d == (1,):
+        v = unc.evaluate_at_index((1,))
+        if isinstance(v, (int, float)):
+            return (v, 0, 1)
+    return None
+
+
+def _get_node_bounds(unc: "UncertainNumber") -> Tuple[Union[float, None], Union[float, None]]:
+    """Calculates and caches the [min_val, max_val] interval bounding for the AST node."""
+    if hasattr(unc, "_cached_bounds"):
+        return unc._cached_bounds
+
+    ast_type = unc.ast.get("type")
+    if ast_type == "leaf":
+        if isinstance(getattr(unc, "elements", None), range):
+            r = unc.elements
+            if len(r) == 0:
+                bounds = (None, None)
+            else:
+                s, e = r[0], r[-1]
+                bounds = (min(s, e), max(s, e))
+        elif hasattr(unc, "elements") and unc.elements:
+            real_elems = [
+                e.real if isinstance(e, complex) else e
+                for e in unc.elements
+                if isinstance(e, (int, float, complex))
+            ]
+            if real_elems:
+                bounds = (min(real_elems), max(real_elems))
+            else:
+                bounds = (None, None)
+        elif unc.d == (1,):
+            v = unc.evaluate_at_index((1,))
+            val = v.real if isinstance(v, complex) else v
+            bounds = (val, val)
+        else:
+            bounds = (None, None)
+
+    elif ast_type == "op":
+        left = unc.ast["left"]
+        right = unc.ast["right"]
+        op_sym = unc.ast.get("operator_symbol", "+")
+        b_l = _get_node_bounds(left)
+        b_r = _get_node_bounds(right)
+        if b_l[0] is None or b_r[0] is None:
+            bounds = (None, None)
+        else:
+            min_l, max_l = b_l
+            min_r, max_r = b_r
+            if op_sym == "+":
+                bounds = (min_l + min_r, max_l + max_r)
+            elif op_sym == "-":
+                bounds = (min_l - max_r, max_l - min_r)
+            elif op_sym == "*":
+                prods = [min_l * min_r, min_l * max_r, max_l * min_r, max_l * max_r]
+                bounds = (min(prods), max(prods))
+            elif op_sym == "/":
+                if min_r <= 0 <= max_r:
+                    bounds = (None, None)
+                else:
+                    divs = [min_l / min_r, min_l / max_r, max_l / min_r, max_l / max_r]
+                    bounds = (min(divs), max(divs))
+            else:
+                bounds = (None, None)
+    else:
+        bounds = (None, None)
+
+    unc._cached_bounds = bounds
+    return bounds
+
+
+def _solve_ast_membership(
+    unc: "UncertainNumber",
+    target: Any,
+    rel_tol: float = 1e-7,
+    abs_tol: float = 1e-9,
+    memo: Union[Set, None] = None,
+    depth: int = 0,
+) -> bool:
+    """
+    Core AST Equation Solver engine:
+    Recursively inverts operators on the formula AST tree to test whether 'target'
+    belongs to the uncertain number in O(depth) / sub-polynomial time.
+    """
+    if depth > 1000:
+        return False
+    if memo is None:
+        memo = set()
+
+    # Memoization key to avoid re-evaluating duplicate sub-equations
+    if isinstance(target, (int, float)):
+        sig_key = float(f"{target:.7e}") if target != 0 else 0.0
+    else:
+        sig_key = target
+    key = (id(unc), sig_key)
+    if key in memo:
+        return False
+    memo.add(key)
+
+    # 1. Interval bounding branch pruning (O(1))
+    b = _get_node_bounds(unc)
+    if b[0] is not None and b[1] is not None and isinstance(target, (int, float)):
+        if (target < b[0] - abs_tol - rel_tol * abs(b[0])) or (target > b[1] + abs_tol + rel_tol * abs(b[1])):
+            return False
+
+    ast_type = unc.ast.get("type")
+
+    # 2. Leaf Node Equation Solving
+    if ast_type == "leaf":
+        # Range representation: O(1) arithmetic inversion
+        if isinstance(getattr(unc, "elements", None), range):
+            r = unc.elements
+            if len(r) == 0:
+                return False
+            if r.step == 0:
+                return _approx_eq(target, r.start, rel_tol, abs_tol)
+            diff = target - r.start
+            k = diff / r.step
+            k_int = round(k)
+            return _approx_eq(k, k_int, rel_tol, abs_tol) and (0 <= k_int < len(r))
+
+        # Explicit elements (list, tuple, set)
+        if hasattr(unc, "elements") and unc.elements is not None:
+            elems = unc.elements
+            if isinstance(elems, set):
+                if target in elems:
+                    return True
+                return any(_approx_eq(e, target, rel_tol, abs_tol) for e in elems)
+            elif isinstance(elems, (list, tuple)):
+                if len(elems) == 0:
+                    return False
+                if all(isinstance(x, (int, float)) for x in elems) and isinstance(target, (int, float)):
+                    # Binary search in sorted element list
+                    pos = bisect.bisect_left(elems, target - abs_tol)
+                    if pos < len(elems) and _approx_eq(elems[pos], target, rel_tol, abs_tol):
+                        return True
+                    if pos > 0 and _approx_eq(elems[pos - 1], target, rel_tol, abs_tol):
+                        return True
+                    return False
+                return any(_approx_eq(e, target, rel_tol, abs_tol) for e in elems)
+
+        # Single scalar scenario d = (1,)
+        if unc.d == (1,):
+            v = unc.evaluate_at_index((1,))
+            return _approx_eq(v, target, rel_tol, abs_tol)
+
+        # Fallback single variable generative function
+        if len(unc.d) == 1:
+            n = unc.d[0]
+            if n <= 100:
+                return any(_approx_eq(unc.f(i), target, rel_tol, abs_tol) for i in range(1, n + 1))
+
+        return False
+
+    # 3. Pointwise Operation Node ((o)_1 / (o)_1')
+    elif unc.ast.get("space_type") == "pointwise":
+        n = unc.d[0] if unc.d else 1
+        # Try symbolic solver via SymPy first for pointwise formulas
+        try:
+            import sympy
+            formula_str = unc.get_formula(["x"])
+            x_sym = sympy.Symbol("x")
+            expr = sympy.sympify(formula_str.replace("^", "**"))
+            sols = sympy.solve(sympy.Eq(expr, target), x_sym)
+            for sol in sols:
+                try:
+                    val_c = complex(sol.evalf())
+                    if abs(val_c.imag) < 1e-9:
+                        r = round(val_c.real)
+                        if 1 <= r <= n and abs(val_c.real - r) < 1e-4:
+                            if _approx_eq(unc.evaluate_at_index((r,)), target, rel_tol, abs_tol):
+                                return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Fast scan if n is moderate
+        if n <= 10000:
+            return any(_approx_eq(unc.evaluate_at_index((i,)), target, rel_tol, abs_tol) for i in range(1, n + 1))
+        return False
+
+    # 4. Minkowski Operation Node ((o)_m / AST Operator)
+    elif ast_type == "op":
+        left: "UncertainNumber" = unc.ast["left"]
+        right: "UncertainNumber" = unc.ast["right"]
+        op_sym = unc.ast.get("operator_symbol", "+")
+
+        # Fast-path 4a: Both children are linear progressions -> Linear Diophantine Equation in O(log n)
+        lin_l = _get_leaf_linear_params(left)
+        lin_r = _get_leaf_linear_params(right)
+        if lin_l and lin_r and op_sym in ("+", "-"):
+            sl, stepl, nl = lin_l
+            sr, stepr, nr = lin_r
+            if (
+                isinstance(sl, int) and isinstance(stepl, int)
+                and isinstance(sr, int) and isinstance(stepr, int)
+                and isinstance(target, int)
+            ):
+                if stepl > 0 and stepr > 0:
+                    return _solve_diophantine_ranges(sl, stepl, nl, sr, stepr, nr, op_sym, target)
+
+        # Fast-path 4b: Invert operation across children
+        len_l = left.index_length if left.d else 0
+        len_r = right.index_length if right.d else 0
+
+        # Helper to extract small candidate sets
+        def _get_cands(node: "UncertainNumber"):
+            if node.ast.get("type") == "leaf" and hasattr(node, "elements") and node.elements is not None:
+                if len(node.elements) <= 1000:
+                    return node.elements
+            if node.index_length <= 100:
+                try:
+                    return node.to_set()
+                except Exception:
+                    return None
+            return None
+
+        cands_r = _get_cands(right)
+        cands_l = _get_cands(left)
+
+        branch_right = True
+        if cands_r is not None and cands_l is not None:
+            branch_right = len(cands_r) <= len(cands_l)
+        elif cands_r is not None:
+            branch_right = True
+        elif cands_l is not None:
+            branch_right = False
+        else:
+            branch_right = len_r <= len_l
+
+        if branch_right and cands_r is not None:
+            for vr in cands_r:
+                if op_sym == "+":
+                    req_l = target - vr
+                    if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                        return True
+                elif op_sym == "-":
+                    req_l = target + vr
+                    if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                        return True
+                elif op_sym == "*":
+                    if _approx_eq(vr, 0, rel_tol, abs_tol):
+                        if _approx_eq(target, 0, rel_tol, abs_tol) and left.index_length > 0:
+                            return True
+                    else:
+                        req_l = target / vr
+                        if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                            return True
+                elif op_sym == "/":
+                    if not _approx_eq(vr, 0, rel_tol, abs_tol):
+                        req_l = target * vr
+                        if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                            return True
+                elif op_sym == "**":
+                    if _approx_eq(vr, 0, rel_tol, abs_tol):
+                        if _approx_eq(target, 1, rel_tol, abs_tol) and left.index_length > 0:
+                            return True
+                    else:
+                        try:
+                            req_l = target ** (1.0 / vr)
+                            if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                                return True
+                        except Exception:
+                            pass
+
+        elif not branch_right and cands_l is not None:
+            for vl in cands_l:
+                if op_sym == "+":
+                    req_r = target - vl
+                    if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                        return True
+                elif op_sym == "-":
+                    req_r = vl - target
+                    if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                        return True
+                elif op_sym == "*":
+                    if _approx_eq(vl, 0, rel_tol, abs_tol):
+                        if _approx_eq(target, 0, rel_tol, abs_tol) and right.index_length > 0:
+                            return True
+                    else:
+                        req_r = target / vl
+                        if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                            return True
+                elif op_sym == "/":
+                    if _approx_eq(target, 0, rel_tol, abs_tol):
+                        if _approx_eq(vl, 0, rel_tol, abs_tol):
+                            if any(not _approx_eq(vr, 0, rel_tol, abs_tol) for vr in cands_r or [1]):
+                                return True
+                    else:
+                        req_r = vl / target
+                        if not _approx_eq(req_r, 0, rel_tol, abs_tol):
+                            if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                                return True
+                elif op_sym == "**":
+                    if vl > 0 and not _approx_eq(vl, 1, rel_tol, abs_tol) and target > 0:
+                        try:
+                            req_r = math.log(target) / math.log(vl)
+                            if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                                return True
+                        except Exception:
+                            pass
+
+        return False
+
+    return False
 
 
 class UncertainNumber:
@@ -375,6 +777,7 @@ class UncertainNumber:
             "left": self,
             "right": other,
             "operator_fn": operator_fn,
+            "operator_symbol": "*",
             "space_type": "minkowski",
         }
 
@@ -573,6 +976,85 @@ class UncertainNumber:
             return f"{{{inner}}}_u"
         except Exception:
             return f"UncertainNumber(d={self.d})"
+    
+    def print_model(self):
+        print(f"d={self.d}\nf={self.formula}")
+
+    @property
+    def index_length(self):
+        """Calculates the total number of scenarios (product of dimension sizes)."""
+        return math.prod(self.d)
+
+    def contains(self, target: Any, rel_tol: float = 1e-7, abs_tol: float = 1e-9) -> bool:
+        """
+        Kiểm tra một phần tử 'target' có thuộc số bất định hay không bằng cách giải phương trình
+        nghịch đảo trên cây AST của công thức (AST Equation Solving).
+        
+        Độ phức tạp: O(k) hoặc O(depth) - Không cần sinh tích Descartes (Lazy Evaluation).
+        """
+        return _solve_ast_membership(self, target, rel_tol=rel_tol, abs_tol=abs_tol)
+
+    def __contains__(self, item: Any) -> bool:
+        """
+        Cho phép sử dụng toán tử `in` của Python (ví dụ: `x in U`) để kiểm tra phần tử
+        thuộc số bất định thông qua bộ giải phương trình trên cây AST.
+        """
+        return self.contains(item)
+
+    def solve_equation(
+        self,
+        target: Any = 0,
+        var_names: Union[List[str], Tuple[str, ...], None] = None,
+    ) -> List[Tuple[int, ...]]:
+        """
+        Giải phương trình f(x_1, x_2, ..., x_k) = target trên cây AST của formula.
+        Tìm tập các bộ chỉ số kịch bản hợp lệ (i_1, ..., i_k) trong miền d thỏa mãn f(i_1, ...) == target.
+        Sử dụng SymPy solver hoặc duyệt trên cây AST kết hợp ràng buộc miền chỉ số.
+        """
+        num_vars = len(self.d) if self.d and self.d != (0,) else 1
+        if var_names is None:
+            if num_vars == 1 and self.ast.get("type") == "leaf":
+                var_names = ["x"]
+            elif num_vars == 1:
+                var_names = ["x_1"]
+            else:
+                var_names = [f"x_{i + 1}" for i in range(num_vars)]
+
+        formula_body = self.get_formula(var_names)
+        try:
+            import sympy
+            symbols = [sympy.Symbol(v) for v in var_names]
+            expr = sympy.sympify(formula_body.replace("^", "**"))
+            eq = sympy.Eq(expr, target)
+
+            if len(symbols) == 1:
+                sols = sympy.solve(eq, symbols[0])
+                valid_tuples = []
+                n_max = self.d[0] if self.d else 1
+                for s in sols:
+                    try:
+                        c_val = complex(s.evalf())
+                        if abs(c_val.imag) < 1e-9:
+                            r = round(c_val.real)
+                            if 1 <= r <= n_max and abs(c_val.real - r) < 1e-4:
+                                if _approx_eq(self.evaluate_at_index((r,)), target):
+                                    valid_tuples.append((r,))
+                    except Exception:
+                        pass
+                return valid_tuples
+        except Exception:
+            pass
+
+        if self.index_length <= 100000:
+            valid_tuples = []
+            index_ranges = [range(1, n + 1) for n in self.d]
+            for idx in itertools.product(*index_ranges):
+                val = self.evaluate_at_index(idx)
+                if _approx_eq(val, target):
+                    valid_tuples.append(idx)
+            return valid_tuples
+
+        return []
 
     def __str__(self):
         return self.__repr__()
