@@ -195,8 +195,8 @@ def _solve_diophantine_ranges(
         b_p = b_abs // g
         u0 = x1 * scale
         v0 = -y1 * scale
-        k_min = max(math.ceil(-u0 / b_p), math.ceil(-v0 / a_p))
-        k_max = min(math.floor((n_a - 1 - u0) / b_p), math.floor((n_b - 1 - v0) / a_p))
+        k_min = max(-(-(-u0) // b_p), -(-(-v0) // a_p))
+        k_max = min((n_a - 1 - u0) // b_p, (n_b - 1 - v0) // a_p)
         return k_min <= k_max
     else:
         x1, y1, g = _extgcd(a, b)
@@ -207,8 +207,8 @@ def _solve_diophantine_ranges(
         b_p = b // g
         u0 = x1 * scale
         v0 = y1 * scale
-        k_min = max(math.ceil(-u0 / b_p), math.ceil((v0 - (n_b - 1)) / a_p))
-        k_max = min(math.floor((n_a - 1 - u0) / b_p), math.floor(v0 / a_p))
+        k_min = max(-(-(-u0) // b_p), -(-((v0 - (n_b - 1))) // a_p))
+        k_max = min((n_a - 1 - u0) // b_p, v0 // a_p)
         return k_min <= k_max
 
 
@@ -320,8 +320,14 @@ def _solve_ast_membership(
         memo = set()
 
     # Memoization key to avoid re-evaluating duplicate sub-equations
-    if isinstance(target, (int, float)):
-        sig_key = float(f"{target:.7e}") if target != 0 else 0.0
+    if isinstance(target, bool):
+        sig_key = target
+    elif isinstance(target, int):
+        sig_key = target
+    elif isinstance(target, float):
+        sig_key = round(target, 7)
+    elif isinstance(target, complex):
+        sig_key = (round(target.real, 7), round(target.imag, 7))
     else:
         sig_key = target
     key = (id(unc), sig_key)
@@ -344,12 +350,19 @@ def _solve_ast_membership(
             r = unc.elements
             if len(r) == 0:
                 return False
-            if r.step == 0:
-                return _approx_eq(target, r.start, rel_tol, abs_tol)
-            diff = target - r.start
-            k = diff / r.step
-            k_int = round(k)
-            return _approx_eq(k, k_int, rel_tol, abs_tol) and (0 <= k_int < len(r))
+            if isinstance(target, int):
+                return target in r
+            if target in r:
+                return True
+            try:
+                diff = target - r.start
+                k_int = round(diff / r.step)
+                if 0 <= k_int < len(r):
+                    val = r.start + k_int * r.step
+                    return _approx_eq(val, target, rel_tol, abs_tol)
+            except Exception:
+                pass
+            return False
 
         # Explicit elements (list, tuple, set)
         if hasattr(unc, "elements") and unc.elements is not None:
