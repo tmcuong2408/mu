@@ -15,6 +15,7 @@ class EPointwiseArithmetic:
         left: UncertainNumber,
         right: UncertainNumber,
         operator_fn: Callable[[Numeric, Numeric], Numeric],
+        operator_symbol: str = "+",
     ) -> UncertainNumber:
         """Connects AST nodes in Extended Point-wise Space (o)_1'[cite: 1]."""
         # Broadcasts index domains if one operand is scalar dimension (1,)
@@ -33,6 +34,7 @@ class EPointwiseArithmetic:
             "left": left,
             "right": right,
             "operator_fn": operator_fn,
+            "operator_symbol": operator_symbol,
             "space_type": "pointwise",
         }
 

@@ -93,6 +93,8 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
         return str(c)
 
     terms = []
+    use_math_style = (var == "x")
+
     for k in range(n - 1, -1, -1):  # highest degree first
         c = coeffs[k]
         if c == 0:
@@ -105,14 +107,21 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
             elif c == -1:
                 terms.append(f"-{var}")
             else:
-                terms.append(f"{_coeff_str(c, True)}{var}")
+                if use_math_style:
+                    terms.append(f"{_coeff_str(c, True)}{var}")
+                else:
+                    terms.append(f"{_coeff_str(c, True)}*{var}")
         else:
+            pow_sym = "^" if use_math_style else "**"
             if c == 1:
-                terms.append(f"{var}^{k}")
+                terms.append(f"{var}{pow_sym}{k}")
             elif c == -1:
-                terms.append(f"-{var}^{k}")
+                terms.append(f"-{var}{pow_sym}{k}")
             else:
-                terms.append(f"{_coeff_str(c, True)}{var}^{k}")
+                if use_math_style:
+                    terms.append(f"{_coeff_str(c, True)}{var}^{k}")
+                else:
+                    terms.append(f"{_coeff_str(c, True)}*{var}**{k}")
 
     if not terms:
         return "0"
@@ -156,9 +165,14 @@ class UncertainNumber:
                     self.f = lambda x: None
                     self._formula_template = lambda v: "0"
                 elif n == 1:
-                    v = data[0]
-                    self.f = lambda x: v
-                    self._formula_template = lambda v: f"{v}"
+                    val = data[0]
+                    self.f = lambda x: val
+                    if val == 1:
+                        self._formula_template = lambda var: f"{var}"
+                    elif val == -1:
+                        self._formula_template = lambda var: f"-{var}"
+                    else:
+                        self._formula_template = lambda var, c=val: f"{c}*{var}"
                 else:
                     start = data[0]
                     step = data.step
@@ -189,9 +203,14 @@ class UncertainNumber:
                 is_numeric = all(isinstance(v, (int, float, complex)) and not isinstance(v, bool) for v in y_values)
                 if is_numeric and n > 0:
                     if n == 1:
-                        v = y_values[0]
-                        self.f = lambda x: v
-                        self._formula_template = lambda v: f"{v}"
+                        val = y_values[0]
+                        self.f = lambda x: val
+                        if val == 1:
+                            self._formula_template = lambda var: f"{var}"
+                        elif val == -1:
+                            self._formula_template = lambda var: f"-{var}"
+                        else:
+                            self._formula_template = lambda var, c=val: f"{c}*{var}"
                     else:
                         # Kiểm tra cấp số cộng để dùng đơn thức bậc nhất f(x) = a*x + b (O(1))
                         step = (y_values[-1] - y_values[0]) / (n - 1)
@@ -249,7 +268,7 @@ class UncertainNumber:
             self.d = tuple(index_domain) if index_domain is not None else ()
             self.ast = ast_node if ast_node is not None else {"type": "custom_fn"}
             self.f = generative_fn if generative_fn is not None else (lambda idx: self.evaluate_at_index(idx))
-            self._formula_template = None
+            self._formula_template = ast_node.get("formula_template") if ast_node else None
 
         else:
             raise ValueError(
@@ -477,8 +496,10 @@ class UncertainNumber:
         """
         num_vars = len(self.d) if self.d and self.d != (0,) else 1
         if var_names is None:
-            if num_vars == 1:
+            if num_vars == 1 and self.ast.get("type") == "leaf":
                 var_names = ["x"]
+            elif num_vars == 1:
+                var_names = ["x_1"]
             else:
                 var_names = [f"x_{i + 1}" for i in range(num_vars)]
 
@@ -487,7 +508,9 @@ class UncertainNumber:
                 v = var_names[0] if var_names else "x"
                 return self._formula_template(v)
             elif hasattr(self, "elements") and len(self.elements) == 1:
-                return str(self.elements[0])
+                val = self.elements[0]
+                v = var_names[0] if var_names else "x"
+                return (f"{val}*{v}" if val not in (1, -1) else (f"{v}" if val == 1 else f"-{v}"))
             else:
                 v_str = ", ".join(var_names) if var_names else "x"
                 return f"f({v_str})"
@@ -508,6 +531,8 @@ class UncertainNumber:
 
             left_str = left.get_formula(left_vars)
             right_str = right.get_formula(right_vars)
+            if op_sym == "*":
+                return f"({left_str})*({right_str})"
             return f"({left_str}) {op_sym} ({right_str})"
 
         v_str = ", ".join(var_names) if var_names else "x"
@@ -517,9 +542,12 @@ class UncertainNumber:
     def formula(self) -> str:
         """Returns the canonical form formula representation: f(x_1, ...) = ..."""
         num_vars = len(self.d) if self.d and self.d != (0,) else 1
-        if num_vars == 1:
+        if num_vars == 1 and self.ast.get("type") == "leaf":
             var_names = ["x"]
             head = "f(x)"
+        elif num_vars == 1:
+            var_names = ["x_1"]
+            head = "f(x_1)"
         else:
             var_names = [f"x_{i + 1}" for i in range(num_vars)]
             head = f"f({', '.join(var_names)})"
@@ -598,6 +626,131 @@ def _to_unc(val: Any) -> UncertainNumber:
     return UncertainNumber({val})
 
 
+class _PwExpr:
+    """Symbolic tracer for Pointwise expressions."""
+
+    def __init__(
+        self,
+        eval_fn: Callable[[Any], Any],
+        formula_fn: Callable[[str], str],
+        unc: "UncertainNumber" = None,
+    ):
+        self.eval_fn = eval_fn
+        self.formula_fn = formula_fn
+        self.unc = unc
+
+    def eval(self, idx: Any) -> Any:
+        return self.eval_fn(idx)
+
+    def get_formula(self, var: str) -> str:
+        return self.formula_fn(var)
+
+    def __add__(self, other):
+        return _make_pw_bin("+", self, other, lambda a, b: a + b)
+
+    def __radd__(self, other):
+        return _make_pw_bin("+", other, self, lambda a, b: a + b)
+
+    def __sub__(self, other):
+        return _make_pw_bin("-", self, other, lambda a, b: a - b)
+
+    def __rsub__(self, other):
+        return _make_pw_bin("-", other, self, lambda a, b: a - b)
+
+    def __mul__(self, other):
+        return _make_pw_bin("*", self, other, lambda a, b: a * b)
+
+    def __rmul__(self, other):
+        return _make_pw_bin("*", other, self, lambda a, b: a * b)
+
+    def __truediv__(self, other):
+        return _make_pw_bin("/", self, other, lambda a, b: a / b)
+
+    def __rtruediv__(self, other):
+        return _make_pw_bin("/", other, self, lambda a, b: a / b)
+
+    def __floordiv__(self, other):
+        return _make_pw_bin("//", self, other, lambda a, b: a // b)
+
+    def __rfloordiv__(self, other):
+        return _make_pw_bin("//", other, self, lambda a, b: a // b)
+
+    def __mod__(self, other):
+        return _make_pw_bin("%", self, other, lambda a, b: a % b)
+
+    def __rmod__(self, other):
+        return _make_pw_bin("%", other, self, lambda a, b: a % b)
+
+    def __pow__(self, other):
+        return _make_pw_bin("**", self, other, lambda a, b: a ** b)
+
+    def __rpow__(self, other):
+        return _make_pw_bin("**", other, self, lambda a, b: a ** b)
+
+    def __neg__(self):
+        return _PwExpr(
+            eval_fn=lambda idx: -self.eval_fn(idx),
+            formula_fn=lambda var: f"-({self.formula_fn(var)})",
+        )
+
+    def __pos__(self):
+        return self
+
+    def __abs__(self):
+        return _PwExpr(
+            eval_fn=lambda idx: abs(self.eval_fn(idx)),
+            formula_fn=lambda var: f"abs({self.formula_fn(var)})",
+        )
+
+
+def _make_pw_bin(op_sym: str, left: Any, right: Any, op_fn: Callable) -> _PwExpr:
+    if isinstance(left, _PwExpr) and isinstance(right, _PwExpr):
+        eval_fn = lambda idx: op_fn(left.eval(idx), right.eval(idx))
+        if op_sym == "+":
+            formula_fn = lambda v: f"({left.get_formula(v)}) + ({right.get_formula(v)})"
+        elif op_sym == "-":
+            formula_fn = lambda v: f"({left.get_formula(v)}) - ({right.get_formula(v)})"
+        elif op_sym == "*":
+            formula_fn = lambda v: f"({left.get_formula(v)})*({right.get_formula(v)})"
+        elif op_sym == "**":
+            formula_fn = lambda v: f"({left.get_formula(v)})**({right.get_formula(v)})"
+        else:
+            formula_fn = lambda v: f"({left.get_formula(v)}) {op_sym} ({right.get_formula(v)})"
+        return _PwExpr(eval_fn, formula_fn)
+
+    elif isinstance(left, _PwExpr):
+        eval_fn = lambda idx: op_fn(left.eval(idx), right)
+        if op_sym == "+":
+            formula_fn = lambda v: f"{left.get_formula(v)} + {right}"
+        elif op_sym == "-":
+            formula_fn = lambda v: f"{left.get_formula(v)} - {right}"
+        elif op_sym == "*":
+            formula_fn = lambda v: f"{left.get_formula(v)}*{right}"
+        elif op_sym == "**":
+            formula_fn = lambda v: f"({left.get_formula(v)})**{right}"
+        else:
+            formula_fn = lambda v: f"{left.get_formula(v)} {op_sym} {right}"
+        return _PwExpr(eval_fn, formula_fn)
+
+    elif isinstance(right, _PwExpr):
+        eval_fn = lambda idx: op_fn(left, right.eval(idx))
+        if op_sym == "*":
+            formula_fn = lambda v: f"{left}*( {right.get_formula(v)})" if " " in right.get_formula(v) else f"{left}*({right.get_formula(v)})"
+        elif op_sym == "+":
+            formula_fn = lambda v: f"{left} + ({right.get_formula(v)})"
+        elif op_sym == "-":
+            formula_fn = lambda v: f"{left} - ({right.get_formula(v)})"
+        elif op_sym == "**":
+            formula_fn = lambda v: f"{left}**({right.get_formula(v)})"
+        else:
+            formula_fn = lambda v: f"{left} {op_sym} ({right.get_formula(v)})"
+        return _PwExpr(eval_fn, formula_fn)
+
+    else:
+        val = op_fn(left, right)
+        return _PwExpr(lambda idx: val, lambda v: str(val))
+
+
 def pw(fn: Callable, *args: Any) -> UncertainNumber:
     """
     Point-wise Space (o)_1 functional operator for lambdas with UncertainNumber parameters.
@@ -614,6 +767,33 @@ def pw(fn: Callable, *args: Any) -> UncertainNumber:
             raise ValueError(
                 f"Point-wise Space (o)_1 requires identical index domains. Got {u.d} and {d0}."
             )
+
+    try:
+        pw_args = [
+            _PwExpr(
+                eval_fn=(lambda idx, unc=u: unc.evaluate_at_index(idx)),
+                formula_fn=(lambda var, unc=u: unc.get_formula([var])),
+                unc=u,
+            )
+            for u in unc_args
+        ]
+        res_expr = fn(*pw_args)
+        if isinstance(res_expr, _PwExpr):
+            return UncertainNumber(
+                generative_fn=lambda idx: res_expr.eval(idx),
+                index_domain=d0,
+                ast_node={
+                    "type": "custom_fn",
+                    "space_type": "pointwise",
+                    "formula_template": lambda v: res_expr.get_formula(v),
+                },
+            )
+        elif isinstance(res_expr, UncertainNumber):
+            return res_expr
+        elif isinstance(res_expr, (int, float, complex)):
+            return UncertainNumber({res_expr})
+    except Exception:
+        pass
 
     generative_fn = lambda idx: fn(*(u.evaluate_at_index(idx) for u in unc_args))
     return UncertainNumber(
@@ -643,6 +823,33 @@ def epw(fn: Callable, *args: Any) -> UncertainNumber:
                 raise ValueError(
                     f"Incompatible multi-element domains for (o)_1': {d} and {target_d}."
                 )
+
+    try:
+        pw_args = [
+            _PwExpr(
+                eval_fn=(lambda idx, unc=u: unc.evaluate_at_index((1,) if unc.d == (1,) else idx)),
+                formula_fn=(lambda var, unc=u: unc.get_formula([var])),
+                unc=u,
+            )
+            for u in unc_args
+        ]
+        res_expr = fn(*pw_args)
+        if isinstance(res_expr, _PwExpr):
+            return UncertainNumber(
+                generative_fn=lambda idx: res_expr.eval(idx),
+                index_domain=target_d,
+                ast_node={
+                    "type": "custom_fn",
+                    "space_type": "pointwise",
+                    "formula_template": lambda v: res_expr.get_formula(v),
+                },
+            )
+        elif isinstance(res_expr, UncertainNumber):
+            return res_expr
+        elif isinstance(res_expr, (int, float, complex)):
+            return UncertainNumber({res_expr})
+    except Exception:
+        pass
 
     generative_fn = lambda idx: fn(
         *(u.evaluate_at_index((1,) if u.d == (1,) else idx) for u in unc_args)

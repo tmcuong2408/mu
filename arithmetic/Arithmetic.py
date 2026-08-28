@@ -48,9 +48,9 @@ class Arithmetic:
         space_key = space.lower()
 
         if space_key == "pw":
-            return PointwiseArithmetic.pw(a_unc, b_unc, operator_fn)
+            return PointwiseArithmetic.pw(a_unc, b_unc, operator_fn, operator_symbol=operator_symbol)
         elif space_key == "epw":
-            return EPointwiseArithmetic.epw(a_unc, b_unc, operator_fn)
+            return EPointwiseArithmetic.epw(a_unc, b_unc, operator_fn, operator_symbol=operator_symbol)
         elif space_key == "m":
             return MinkowskiArithmetic.m(a_unc, b_unc, operator_fn, operator_symbol=operator_symbol)
         elif space_key == "em":

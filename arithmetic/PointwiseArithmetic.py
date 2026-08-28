@@ -16,6 +16,7 @@ class PointwiseArithmetic:
         left: UncertainNumber,
         right: UncertainNumber,
         operator_fn: Callable[[Numeric, Numeric], Numeric],
+        operator_symbol: str = "+",
     ) -> UncertainNumber:
         """
         Connects two AST nodes in Point-wise Space (o)_1[cite: 1].
@@ -34,6 +35,7 @@ class PointwiseArithmetic:
             "left": left,
             "right": right,
             "operator_fn": operator_fn,
+            "operator_symbol": operator_symbol,
             "space_type": "pointwise",
         }
 
