@@ -1,31 +1,126 @@
 import math
 import itertools
 import bisect
+from fractions import Fraction
+from decimal import Decimal, getcontext, ROUND_HALF_EVEN, InvalidOperation
 from typing import Callable, Union, List, Tuple, Set, Any
 
+# Độ chính xác cao cho Decimal (512 chữ số thập phân)
+getcontext().prec = 512
+
 # Type alias for numeric types (supporting both Real and Complex numbers)
-Numeric = Union[int, float, complex]
+Numeric = Union[int, float, complex, Fraction, Decimal]
 
 
+# ==================== HELPER: số học chính xác ====================
+
+def _to_exact(v: Any) -> Any:
+    """
+    Chuyển float sang Fraction (biểu diễn chính xác) nếu có thể.
+    int, Fraction, complex giữ nguyên.
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return v
+    if isinstance(v, Fraction):
+        return v
+    if isinstance(v, float):
+        if math.isfinite(v):
+            return Fraction(v).limit_denominator(10**15)
+        return v  # inf / nan giữ nguyên float
+    if isinstance(v, Decimal):
+        try:
+            return Fraction(v)
+        except Exception:
+            return v
+    return v
+
+
+def _to_display(v: Any) -> Any:
+    """
+    Chuyển Fraction thành int nếu mẫu = 1, hoặc float nếu mẫu đơn giản.
+    Dùng cho to_set() để giữ kiểu dữ liệu gọn gàng.
+    """
+    if isinstance(v, Fraction):
+        if v.denominator == 1:
+            return v.numerator
+        # Nếu denominator nhỏ, trả về Fraction (chính xác)
+        return v
+    if isinstance(v, float):
+        if math.isfinite(v) and v == int(v):
+            return int(v)
+        return v
+    if isinstance(v, complex):
+        r = _to_display(v.real)
+        i = _to_display(v.imag)
+        if i == 0:
+            return r
+        return complex(r, i)
+    return v
+
+
+def _safe_round_val(val: Any) -> Any:
+    """Làm sạch giá trị sau tính toán, ưu tiên giữ int hoặc Fraction."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, int):
+        return val
+    if isinstance(val, Fraction):
+        return _to_display(val)
+    if isinstance(val, float):
+        if not math.isfinite(val):
+            return val
+        # Chuyển sang Fraction rồi quyết định
+        frac = Fraction(val).limit_denominator(10**12)
+        if abs(float(frac) - val) < 1e-10 * (1 + abs(val)):
+            return _to_display(frac)
+        return round(val, 10)
+    if isinstance(val, complex):
+        r = _safe_round_val(val.real)
+        i = _safe_round_val(val.imag)
+        if i == 0:
+            return r
+        return complex(float(r), float(i))
+    return val
+
+
+# ==================== LAGRANGE INTERPOLATION ====================
 
 def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Callable[[Numeric], Numeric]:
     """
-    Constructs a generative function f(x) via Lagrange Polynomial Interpolation[cite: 1].
-    Maps index nodes {1, ..., n} to corresponding numeric target values[cite: 1].
+    Constructs a generative function f(x) via Lagrange Polynomial Interpolation.
+    Sử dụng Fraction để đảm bảo độ chính xác tuyệt đối với số nguyên lớn.
     """
     n = len(x_nodes)
+    # Precompute denominators dùng Fraction
+    x_frac = [Fraction(xi) for xi in x_nodes]
+    y_frac = [_to_exact(yi) for yi in y_values]
 
     def generative_fn(x: Numeric) -> Numeric:
-        total = 0
+        x_f = _to_exact(x[0] if isinstance(x, tuple) else x)
+        total = Fraction(0)
         for i in range(n):
-            xi, yi = x_nodes[i], y_values[i]
-            li = 1
+            xi, yi = x_frac[i], y_frac[i]
+            li = Fraction(1)
             for j in range(n):
                 if i != j:
-                    xj = x_nodes[j]
-                    li *= (x - xj) / (xi - xj)
-            total += yi * li
-        return total
+                    xj = x_frac[j]
+                    li *= (x_f - xj) / (xi - xj)
+            if isinstance(yi, (int, Fraction)):
+                total += Fraction(yi) * li
+            else:
+                # complex or float fallback
+                return sum(
+                    y_values[ii] * float(
+                        Fraction.__mul__(
+                            Fraction(1),
+                            Fraction(1)
+                        )
+                    )
+                    for ii in range(n)
+                )
+        return _to_display(total)
 
     return generative_fn
 
@@ -33,63 +128,48 @@ def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Calla
 def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str = "x") -> str:
     """
     Returns a human-readable symbolic string for the Lagrange interpolating polynomial.
-    Expands the polynomial into a sum of coefficient * x^k terms (collected form).
+    Dùng Fraction cho hệ số chính xác.
     """
     n = len(x_nodes)
+    x_frac = [Fraction(xi) for xi in x_nodes]
 
-    # Represent the polynomial as a list of coefficients [a0, a1, ..., a_{n-1}]
-    # where p(x) = a0 + a1*x + a2*x^2 + ...
-    # We accumulate coefficients via polynomial multiplication.
-
-    def poly_mul(p: List[float], q: List[float]) -> List[float]:
-        """Multiply two polynomials represented as coefficient lists (index = degree)."""
-        result = [0.0] * (len(p) + len(q) - 1)
+    def poly_mul_frac(p: List[Fraction], q: List[Fraction]) -> List[Fraction]:
+        result = [Fraction(0)] * (len(p) + len(q) - 1)
         for i, pi in enumerate(p):
             for j, qj in enumerate(q):
                 result[i + j] += pi * qj
         return result
 
-    coeffs = [0.0] * n  # accumulated result polynomial
+    coeffs = [Fraction(0)] * n
 
     for i in range(n):
-        xi, yi = x_nodes[i], y_values[i]
-        # Build L_i(x) = product_{j != i} (x - xj) / (xi - xj)
-        li_poly = [1.0]  # start with constant 1
-        denom = 1.0
+        xi, yi = x_frac[i], _to_exact(y_values[i])
+        li_poly = [Fraction(1)]
+        denom = Fraction(1)
         for j in range(n):
             if i != j:
-                xj = x_nodes[j]
-                # multiply by (x - xj): polynomial [-xj, 1]
-                li_poly = poly_mul(li_poly, [-xj, 1.0])
+                xj = x_frac[j]
+                li_poly = poly_mul_frac(li_poly, [-xj, Fraction(1)])
                 denom *= (xi - xj)
-        # scale by yi / denom
-        scale = yi / denom
+        if isinstance(yi, (int, Fraction)):
+            scale = Fraction(yi) / denom
+        else:
+            scale = Fraction(float(yi)) / denom
         for k in range(len(li_poly)):
             if k < n:
                 coeffs[k] += li_poly[k] * scale
 
-    # Round and format coefficients: integers as int, rationals as fraction, else float
-    from fractions import Fraction
-
-    def _fmt(c: float):
-        c = round(c, 9)
-        if abs(c - round(c)) < 1e-9:
-            return int(round(c))
-        # Try to express as a simple fraction (denominator <= 1000)
-        try:
-            frac = Fraction(c).limit_denominator(1000)
-            if abs(float(frac) - c) < 1e-9:
-                return frac  # keeps exact display via str(frac) e.g. "1/3"
-        except Exception:
-            pass
-        return round(c, 6)
+    def _fmt(c: Fraction):
+        if c.denominator == 1:
+            return c.numerator
+        # Trả về Fraction nếu đơn giản, float nếu không
+        if abs(c.denominator) <= 10000:
+            return c
+        return float(c)
 
     coeffs = [_fmt(c) for c in coeffs]
 
-    # Build human-readable string
     def _coeff_str(c, with_var: bool) -> str:
-        """Format coefficient for display, wrapping fractions in parens when next to a variable."""
-        from fractions import Fraction
         if isinstance(c, Fraction):
             return f"({c})" if with_var else str(c)
         return str(c)
@@ -97,7 +177,7 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
     terms = []
     use_math_style = (var == "x")
 
-    for k in range(n - 1, -1, -1):  # highest degree first
+    for k in range(n - 1, -1, -1):
         c = coeffs[k]
         if c == 0:
             continue
@@ -128,7 +208,6 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
     if not terms:
         return "0"
 
-    # Join terms, handling sign of subsequent terms
     result = terms[0]
     for t in terms[1:]:
         if t.startswith("-"):
@@ -138,21 +217,51 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
     return result
 
 
+# ==================== APPROX EQ (chịu được số nguyên siêu lớn) ====================
+
 def _approx_eq(a: Any, b: Any, rel_tol: float = 1e-7, abs_tol: float = 1e-9) -> bool:
-    """Checks approximate equality for numeric types (int, float, complex)."""
+    """Checks approximate equality. An toàn với số nguyên siêu lớn và Fraction."""
     if a is None or b is None:
         return False
+    # Exact equality (handles int, Fraction, etc.)
+    try:
+        if a == b:
+            return True
+    except Exception:
+        pass
+
+    # Complex check
     if isinstance(a, complex) or isinstance(b, complex):
-        ca, cb = complex(a), complex(b)
-        return (
-            math.isclose(ca.real, cb.real, rel_tol=rel_tol, abs_tol=abs_tol)
-            and math.isclose(ca.imag, cb.imag, rel_tol=rel_tol, abs_tol=abs_tol)
-        )
+        try:
+            ca, cb = complex(a), complex(b)
+            return (
+                math.isclose(ca.real, cb.real, rel_tol=rel_tol, abs_tol=abs_tol)
+                and math.isclose(ca.imag, cb.imag, rel_tol=rel_tol, abs_tol=abs_tol)
+            )
+        except (OverflowError, ValueError):
+            return False
+
+    # Fraction / int exact comparison
+    try:
+        fa = Fraction(a) if not isinstance(a, Fraction) else a
+        fb = Fraction(b) if not isinstance(b, Fraction) else b
+        diff = abs(fa - fb)
+        if diff == 0:
+            return True
+        scale = max(abs(fa), abs(fb))
+        if scale == 0:
+            return diff <= Fraction(abs_tol)
+        return diff <= Fraction(rel_tol) * scale + Fraction(abs_tol)
+    except (TypeError, ValueError, OverflowError, InvalidOperation):
+        pass
+
     try:
         return math.isclose(float(a), float(b), rel_tol=rel_tol, abs_tol=abs_tol)
-    except Exception:
-        return a == b
+    except (OverflowError, ValueError):
+        return False
 
+
+# ==================== EXTENDED GCD & DIOPHANTINE ====================
 
 def _extgcd(a: int, b: int) -> Tuple[int, int, int]:
     """Extended Euclidean Algorithm returning (x, y, gcd) such that a*x + b*y = gcd."""
@@ -168,10 +277,7 @@ def _solve_diophantine_ranges(
     op: str, target: int
 ) -> bool:
     """
-    Solves linear Diophantine membership for two range arithmetic sequences in O(log(min(step_a, step_b))):
-    a + b = target or a - b = target, where
-    a = s_a + u * step_a (0 <= u < n_a)
-    b = s_b + v * step_b (0 <= v < n_b)
+    Solves linear Diophantine membership for two range arithmetic sequences in O(log(min(step_a, step_b))).
     """
     if op == "+":
         rem = target - s_a - s_b
@@ -226,13 +332,24 @@ def _get_leaf_linear_params(unc: "UncertainNumber") -> Union[Tuple[Numeric, Nume
             return None
         if n == 1:
             return (elems[0], 0, 1)
-        if all(isinstance(x, (int, float)) for x in elems):
-            step = (elems[-1] - elems[0]) / (n - 1)
-            if all(abs(elems[i] - (elems[0] + i * step)) < 1e-9 for i in range(n)):
-                return (elems[0], step, n)
+        if all(isinstance(x, (int, float, Fraction)) for x in elems):
+            e0 = _to_exact(elems[0])
+            e_last = _to_exact(elems[-1])
+            step = (e_last - e0) / (n - 1) if isinstance(e0, Fraction) else (e_last - e0) / (n - 1)
+            # Dùng Fraction để so sánh chính xác
+            try:
+                step_f = Fraction(e_last - e0, n - 1) if isinstance(e0, (int, Fraction)) else step
+                is_arith = all(
+                    _to_exact(elems[i]) == e0 + i * step_f
+                    for i in range(n)
+                )
+                if is_arith:
+                    return (elems[0], step if isinstance(step, (int, float)) else step_f, n)
+            except Exception:
+                pass
     if unc.d == (1,):
         v = unc.evaluate_at_index((1,))
-        if isinstance(v, (int, float)):
+        if isinstance(v, (int, float, Fraction)):
             return (v, 0, 1)
     return None
 
@@ -252,11 +369,12 @@ def _get_node_bounds(unc: "UncertainNumber") -> Tuple[Union[float, None], Union[
                 s, e = r[0], r[-1]
                 bounds = (min(s, e), max(s, e))
         elif hasattr(unc, "elements") and unc.elements:
-            real_elems = [
-                e.real if isinstance(e, complex) else e
-                for e in unc.elements
-                if isinstance(e, (int, float, complex))
-            ]
+            real_elems = []
+            for e in unc.elements:
+                if isinstance(e, complex):
+                    real_elems.append(e.real)
+                elif isinstance(e, (int, float, Fraction)):
+                    real_elems.append(e)
             if real_elems:
                 bounds = (min(real_elems), max(real_elems))
             else:
@@ -287,11 +405,14 @@ def _get_node_bounds(unc: "UncertainNumber") -> Tuple[Union[float, None], Union[
                 prods = [min_l * min_r, min_l * max_r, max_l * min_r, max_l * max_r]
                 bounds = (min(prods), max(prods))
             elif op_sym == "/":
-                if min_r <= 0 <= max_r:
+                try:
+                    if min_r <= 0 <= max_r:
+                        bounds = (None, None)
+                    else:
+                        divs = [min_l / min_r, min_l / max_r, max_l / min_r, max_l / max_r]
+                        bounds = (min(divs), max(divs))
+                except Exception:
                     bounds = (None, None)
-                else:
-                    divs = [min_l / min_r, min_l / max_r, max_l / min_r, max_l / max_r]
-                    bounds = (min(divs), max(divs))
             else:
                 bounds = (None, None)
     else:
@@ -310,20 +431,21 @@ def _solve_ast_membership(
     depth: int = 0,
 ) -> bool:
     """
-    Core AST Equation Solver engine:
-    Recursively inverts operators on the formula AST tree to test whether 'target'
-    belongs to the uncertain number in O(depth) / sub-polynomial time.
+    Core AST Equation Solver engine.
+    An toàn với số nguyên siêu lớn và Fraction.
     """
     if depth > 1000:
         return False
     if memo is None:
         memo = set()
 
-    # Memoization key to avoid re-evaluating duplicate sub-equations
+    # Memoization key
     if isinstance(target, bool):
         sig_key = target
     elif isinstance(target, int):
         sig_key = target
+    elif isinstance(target, Fraction):
+        sig_key = target  # hashable
     elif isinstance(target, float):
         sig_key = round(target, 7)
     elif isinstance(target, complex):
@@ -335,17 +457,24 @@ def _solve_ast_membership(
         return False
     memo.add(key)
 
-    # 1. Interval bounding branch pruning (O(1))
+    # 1. Interval bounding branch pruning
     b = _get_node_bounds(unc)
-    if b[0] is not None and b[1] is not None and isinstance(target, (int, float)):
-        if (target < b[0] - abs_tol - rel_tol * abs(b[0])) or (target > b[1] + abs_tol + rel_tol * abs(b[1])):
-            return False
+    if b[0] is not None and b[1] is not None and isinstance(target, (int, float, Fraction)):
+        try:
+            t_val = target
+            lo, hi = b[0], b[1]
+            # So sánh an toàn
+            if t_val < lo - abs_tol - rel_tol * abs(lo):
+                return False
+            if t_val > hi + abs_tol + rel_tol * abs(hi):
+                return False
+        except (TypeError, OverflowError):
+            pass
 
     ast_type = unc.ast.get("type")
 
-    # 2. Leaf Node Equation Solving
+    # 2. Leaf Node
     if ast_type == "leaf":
-        # Range representation: O(1) arithmetic inversion
         if isinstance(getattr(unc, "elements", None), range):
             r = unc.elements
             if len(r) == 0:
@@ -364,7 +493,6 @@ def _solve_ast_membership(
                 pass
             return False
 
-        # Explicit elements (list, tuple, set)
         if hasattr(unc, "elements") and unc.elements is not None:
             elems = unc.elements
             if isinstance(elems, set):
@@ -374,8 +502,12 @@ def _solve_ast_membership(
             elif isinstance(elems, (list, tuple)):
                 if len(elems) == 0:
                     return False
-                if all(isinstance(x, (int, float)) for x in elems) and isinstance(target, (int, float)):
-                    # Binary search in sorted element list
+                if (all(isinstance(x, (int, Fraction)) for x in elems)
+                        and isinstance(target, (int, Fraction))):
+                    # Exact integer/Fraction membership
+                    return any(e == target for e in elems)
+                if (all(isinstance(x, (int, float)) for x in elems)
+                        and isinstance(target, (int, float))):
                     pos = bisect.bisect_left(elems, target - abs_tol)
                     if pos < len(elems) and _approx_eq(elems[pos], target, rel_tol, abs_tol):
                         return True
@@ -384,12 +516,10 @@ def _solve_ast_membership(
                     return False
                 return any(_approx_eq(e, target, rel_tol, abs_tol) for e in elems)
 
-        # Single scalar scenario d = (1,)
         if unc.d == (1,):
             v = unc.evaluate_at_index((1,))
             return _approx_eq(v, target, rel_tol, abs_tol)
 
-        # Fallback single variable generative function
         if len(unc.d) == 1:
             n = unc.d[0]
             if n <= 100:
@@ -397,10 +527,9 @@ def _solve_ast_membership(
 
         return False
 
-    # 3. Pointwise Operation Node ((o)_1 / (o)_1')
+    # 3. Pointwise Operation Node
     elif unc.ast.get("space_type") == "pointwise":
         n = unc.d[0] if unc.d else 1
-        # Try symbolic solver via SymPy first for pointwise formulas
         try:
             import sympy
             formula_str = unc.get_formula(["x"])
@@ -420,18 +549,17 @@ def _solve_ast_membership(
         except Exception:
             pass
 
-        # Fast scan if n is moderate
         if n <= 10000:
             return any(_approx_eq(unc.evaluate_at_index((i,)), target, rel_tol, abs_tol) for i in range(1, n + 1))
         return False
 
-    # 4. Minkowski Operation Node ((o)_m / AST Operator)
+    # 4. Minkowski Operation Node
     elif ast_type == "op":
         left: "UncertainNumber" = unc.ast["left"]
         right: "UncertainNumber" = unc.ast["right"]
         op_sym = unc.ast.get("operator_symbol", "+")
 
-        # Fast-path 4a: Both children are linear progressions -> Linear Diophantine Equation in O(log n)
+        # Fast-path 4a: Linear Diophantine
         lin_l = _get_leaf_linear_params(left)
         lin_r = _get_leaf_linear_params(right)
         if lin_l and lin_r and op_sym in ("+", "-"):
@@ -445,11 +573,10 @@ def _solve_ast_membership(
                 if stepl > 0 and stepr > 0:
                     return _solve_diophantine_ranges(sl, stepl, nl, sr, stepr, nr, op_sym, target)
 
-        # Fast-path 4b: Invert operation across children
+        # Fast-path 4b: Invert operation
         len_l = left.index_length if left.d else 0
         len_r = right.index_length if right.d else 0
 
-        # Helper to extract small candidate sets
         def _get_cands(node: "UncertainNumber"):
             if node.ast.get("type") == "leaf" and hasattr(node, "elements") and node.elements is not None:
                 if len(node.elements) <= 1000:
@@ -489,20 +616,38 @@ def _solve_ast_membership(
                         if _approx_eq(target, 0, rel_tol, abs_tol) and left.index_length > 0:
                             return True
                     else:
-                        req_l = target / vr
-                        if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
-                            return True
+                        try:
+                            req_l = _to_exact(target) / _to_exact(vr)
+                            if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                                return True
+                        except Exception:
+                            pass
                 elif op_sym == "/":
                     if not _approx_eq(vr, 0, rel_tol, abs_tol):
-                        req_l = target * vr
-                        if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
-                            return True
+                        try:
+                            req_l = _to_exact(target) * _to_exact(vr)
+                            if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
+                                return True
+                        except Exception:
+                            pass
                 elif op_sym == "**":
                     if _approx_eq(vr, 0, rel_tol, abs_tol):
                         if _approx_eq(target, 1, rel_tol, abs_tol) and left.index_length > 0:
                             return True
                     else:
                         try:
+                            # Dùng Fraction nếu vr là int/Fraction
+                            if isinstance(vr, (int, Fraction)) and isinstance(target, int) and target > 0:
+                                # req_l = target^(1/vr) — kiểm tra chính xác
+                                vr_f = Fraction(vr)
+                                if vr_f.denominator == 1 and vr_f.numerator > 0:
+                                    p = vr_f.numerator
+                                    # Kiểm tra xem target có phải p-th power không
+                                    guess = round(target ** (1.0 / p))
+                                    for candidate in [guess - 1, guess, guess + 1]:
+                                        if candidate > 0 and candidate ** p == target:
+                                            if _solve_ast_membership(left, candidate, rel_tol, abs_tol, memo, depth + 1):
+                                                return True
                             req_l = target ** (1.0 / vr)
                             if _solve_ast_membership(left, req_l, rel_tol, abs_tol, memo, depth + 1):
                                 return True
@@ -524,23 +669,29 @@ def _solve_ast_membership(
                         if _approx_eq(target, 0, rel_tol, abs_tol) and right.index_length > 0:
                             return True
                     else:
-                        req_r = target / vl
-                        if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
-                            return True
+                        try:
+                            req_r = _to_exact(target) / _to_exact(vl)
+                            if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                                return True
+                        except Exception:
+                            pass
                 elif op_sym == "/":
                     if _approx_eq(target, 0, rel_tol, abs_tol):
                         if _approx_eq(vl, 0, rel_tol, abs_tol):
-                            if any(not _approx_eq(vr, 0, rel_tol, abs_tol) for vr in cands_r or [1]):
+                            if any(not _approx_eq(vr2, 0, rel_tol, abs_tol) for vr2 in cands_r or [1]):
                                 return True
                     else:
-                        req_r = vl / target
-                        if not _approx_eq(req_r, 0, rel_tol, abs_tol):
-                            if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
-                                return True
-                elif op_sym == "**":
-                    if vl > 0 and not _approx_eq(vl, 1, rel_tol, abs_tol) and target > 0:
                         try:
-                            req_r = math.log(target) / math.log(vl)
+                            req_r = _to_exact(vl) / _to_exact(target)
+                            if not _approx_eq(req_r, 0, rel_tol, abs_tol):
+                                if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
+                                    return True
+                        except Exception:
+                            pass
+                elif op_sym == "**":
+                    if isinstance(vl, (int, Fraction)) and vl > 0 and not _approx_eq(vl, 1, rel_tol, abs_tol) and isinstance(target, int) and target > 0:
+                        try:
+                            req_r = Fraction(math.log(target), math.log(float(vl)))
                             if _solve_ast_membership(right, req_r, rel_tol, abs_tol, memo, depth + 1):
                                 return True
                         except Exception:
@@ -554,9 +705,7 @@ def _solve_ast_membership(
 class UncertainNumber:
     """
     Represents an Uncertain Number U(K) defined strictly via its Canonical Form (f_X, d_X).
-    The index domain 'd' is a Tuple of integers where each element represents 
-    the maximum index size (n_i) for that dimension.
-    Joined via Abstract AST Composition '*'.
+    Hỗ trợ số nguyên siêu lớn và độ chính xác cao qua Fraction / Python native int.
     """
 
     def __init__(
@@ -566,11 +715,6 @@ class UncertainNumber:
         index_domain: Union[Tuple[int, ...], None] = None,
         ast_node: Union[dict, None] = None,
     ):
-        """
-        Initializer for an Uncertain Number:
-        1. From raw numeric data: Constructs Lagrange polynomial generative function f(x).
-        2. From pure Canonical Form: Generative function 'f' and index domain tuple 'd' representing sizes.
-        """
         if data is not None:
             if isinstance(data, range):
                 n = len(data)
@@ -591,7 +735,6 @@ class UncertainNumber:
                 else:
                     start = data[0]
                     step = data.step
-                    # Đơn thức bậc nhất O(1): f(x) = start + (x - 1) * step
                     self.f = lambda x: start + ((x[0] if isinstance(x, tuple) else x) - 1) * step
                     if step == 1 and start == 1:
                         self._formula_template = lambda v: f"{v}"
@@ -606,16 +749,21 @@ class UncertainNumber:
             else:
                 data_list = list(data)
                 try:
-                    y_values = sorted(data_list)
+                    y_values = sorted(data_list, key=lambda x: (
+                        isinstance(x, complex),
+                        float(x.real) if isinstance(x, complex) else float(x) if isinstance(x, (int, float, Fraction)) else 0
+                    ))
                 except Exception:
                     y_values = data_list
                 n = len(y_values)
 
-                # 'd' is a tuple containing the maximum index size: d = (n,)
                 self.d: Tuple[int, ...] = (n,)
                 self.elements = y_values
 
-                is_numeric = all(isinstance(v, (int, float, complex)) and not isinstance(v, bool) for v in y_values)
+                is_numeric = all(
+                    isinstance(v, (int, float, complex, Fraction)) and not isinstance(v, bool)
+                    for v in y_values
+                )
                 if is_numeric and n > 0:
                     if n == 1:
                         val = y_values[0]
@@ -627,50 +775,85 @@ class UncertainNumber:
                         else:
                             self._formula_template = lambda var, c=val: f"{c}*{var}"
                     else:
-                        # Kiểm tra cấp số cộng để dùng đơn thức bậc nhất f(x) = a*x + b (O(1))
-                        step = (y_values[-1] - y_values[0]) / (n - 1)
-                        is_arithmetic = False
-                        if n <= 100:
-                            is_arithmetic = all(abs(y_values[i] - (y_values[0] + i * step)) < 1e-9 for i in range(n))
-                        else:
-                            is_arithmetic = (
-                                abs(y_values[1] - (y_values[0] + step)) < 1e-9 and
-                                abs(y_values[n // 2] - (y_values[0] + (n // 2) * step)) < 1e-9 and
-                                abs(y_values[-1] - (y_values[0] + (n - 1) * step)) < 1e-9
+                        # Kiểm tra cấp số cộng — dùng Fraction để chính xác
+                        all_int_or_frac = all(isinstance(v, (int, Fraction)) for v in y_values)
+                        if all_int_or_frac:
+                            e0 = Fraction(y_values[0])
+                            e_last = Fraction(y_values[-1])
+                            step_f = Fraction(e_last - e0, n - 1) if n > 1 else Fraction(0)
+                            is_arithmetic = all(
+                                Fraction(y_values[i]) == e0 + i * step_f
+                                for i in range(n)
                             )
+                        else:
+                            step = (float(y_values[-1]) - float(y_values[0])) / (n - 1)
+                            is_arithmetic = False
+                            if n <= 100:
+                                is_arithmetic = all(
+                                    abs(float(y_values[i]) - (float(y_values[0]) + i * step)) < 1e-9
+                                    for i in range(n)
+                                )
+                            else:
+                                is_arithmetic = (
+                                    abs(float(y_values[1]) - (float(y_values[0]) + step)) < 1e-9 and
+                                    abs(float(y_values[n // 2]) - (float(y_values[0]) + (n // 2) * step)) < 1e-9 and
+                                    abs(float(y_values[-1]) - (float(y_values[0]) + (n - 1) * step)) < 1e-9
+                                )
+                            step_f = step
 
                         if is_arithmetic:
                             y0 = y_values[0]
-                            # Đơn thức bậc nhất: f(x) = y0 + (x - 1) * step
-                            self.f = lambda x: y0 + ((x[0] if isinstance(x, tuple) else x) - 1) * step
-                            if step == 1 and y0 == 1:
-                                self._formula_template = lambda v: f"{v}"
-                            elif step == 1 and y0 == 0:
-                                self._formula_template = lambda v: f"{v} - 1"
-                            elif step == 1:
-                                self._formula_template = lambda v: f"{y0 - 1} + {v}" if y0 > 1 else f"{v} - {1 - y0}"
+                            _step_f = step_f  # capture
+
+                            def _arith_f(x, _y0=y0, _step=_step_f):
+                                idx = x[0] if isinstance(x, tuple) else x
+                                result = _y0 + (idx - 1) * _step
+                                return _to_display(result) if isinstance(result, Fraction) else result
+
+                            self.f = _arith_f
+
+                            # Formula template
+                            if all_int_or_frac:
+                                s = int(step_f) if step_f.denominator == 1 else step_f
+                                y0d = int(e0) if e0.denominator == 1 else e0
                             else:
-                                self._formula_template = lambda v: f"{y0} + ({v} - 1) * {step}"
+                                s = step_f
+                                y0d = y_values[0]
+
+                            if s == 1 and y0d == 1:
+                                self._formula_template = lambda v: f"{v}"
+                            elif s == 1 and y0d == 0:
+                                self._formula_template = lambda v: f"{v} - 1"
+                            elif s == 1:
+                                self._formula_template = (
+                                    (lambda v: f"{y0d - 1} + {v}") if y0d > 1
+                                    else (lambda v: f"{v} - {1 - y0d}")
+                                )
+                            else:
+                                self._formula_template = lambda v, _y=y0d, _s=s: f"{_y} + ({v} - 1) * {_s}"
                         elif n <= 10:
-                            # Lagrange cho tập nhỏ
                             x_nodes = list(range(1, n + 1))
                             self.f = lagrange_interpolation(x_nodes, y_values)
-                            # Capture x_nodes/y_values in closure to build symbolic formula
                             _xn, _yv = x_nodes[:], y_values[:]
                             self._formula_template = lambda v, xn=_xn, yv=_yv: lagrange_formula_str(xn, yv, v)
                         else:
-                            # Tra cứu mảng O(1) và nội suy tuyến tính từng đoạn
-                            def _fast_eval(x: Numeric) -> Numeric:
+                            # Tra cứu mảng O(1)
+                            _yv_cap = y_values[:]
+
+                            def _fast_eval(x: Numeric, _yv=_yv_cap, _n=n) -> Numeric:
                                 idx_val = x[0] if isinstance(x, tuple) else x
-                                if isinstance(idx_val, (int, float)) and 1 <= idx_val <= n:
-                                    if isinstance(idx_val, int) or idx_val.is_integer():
-                                        return y_values[int(idx_val) - 1]
+                                if isinstance(idx_val, (int, float, Fraction)) and 1 <= idx_val <= _n:
+                                    if isinstance(idx_val, int) or (isinstance(idx_val, float) and idx_val.is_integer()):
+                                        return _yv[int(idx_val) - 1]
+                                    if isinstance(idx_val, Fraction) and idx_val.denominator == 1:
+                                        return _yv[int(idx_val) - 1]
                                     x_int = int(idx_val)
-                                    if x_int == n:
-                                        return y_values[-1]
-                                    frac = idx_val - x_int
-                                    return y_values[x_int - 1] * (1 - frac) + y_values[x_int] * frac
+                                    if x_int == _n:
+                                        return _yv[-1]
+                                    frac_part = idx_val - x_int
+                                    return _yv[x_int - 1] * (1 - frac_part) + _yv[x_int] * frac_part
                                 return None
+
                             self.f = _fast_eval
                             self._formula_template = lambda v: f"PiecewiseLinear({v})"
                 else:
@@ -679,7 +862,6 @@ class UncertainNumber:
                 self.ast: dict = {"type": "leaf"}
 
         elif generative_fn is not None or index_domain is not None or ast_node is not None:
-            # Pure Canonical Form initialization with index domain size tuple (f, d)
             self.d = tuple(index_domain) if index_domain is not None else ()
             self.ast = ast_node if ast_node is not None else {"type": "custom_fn"}
             self.f = generative_fn if generative_fn is not None else (lambda idx: self.evaluate_at_index(idx))
@@ -691,10 +873,7 @@ class UncertainNumber:
             )
 
     def evaluate_at_index(self, index_key: Any) -> Any:
-        """
-        Evaluates the generative function f_X at a specific index key or index tuple.
-        Recursively traverses AST node connections.
-        """
+        """Evaluates the generative function f_X at a specific index key or index tuple."""
         if not isinstance(index_key, tuple):
             index_key = (index_key,)
 
@@ -728,61 +907,42 @@ class UncertainNumber:
 
             val_left = left.evaluate_at_index(idx_left)
             val_right = right.evaluate_at_index(idx_right)
-
-            # Dynamically execute abstract operator function
             return operator_fn(val_left, val_right)
 
         return self.f(index_key[0] if len(index_key) == 1 else index_key)
 
     def to_set(self) -> Set[Any]:
         """
-        Executes Lazy Evaluation: Generates candidate index ranges (1..n_i) from tuple 'd'
-        and evaluates connected AST nodes to output the final outcome set.
+        Lazy Evaluation: sinh tập kết quả từ miền chỉ số.
+        Dùng so sánh chính xác cho int/Fraction, không làm tròn float tùy tiện.
         """
         if self.d == (0,) or (self.ast.get("type") == "leaf" and hasattr(self, "elements") and not self.elements):
             return set()
 
-        # Generate 1-based index ranges for each dimension represented in tuple 'd'
         index_ranges = [range(1, n + 1) for n in self.d]
-        
+
         results = set()
-        # Perform Cartesian product iteration over all index dimension ranges
         for idx in itertools.product(*index_ranges):
             try:
                 val = self.evaluate_at_index(idx)
                 if val is None:
                     continue
-                if isinstance(val, float):
-                    val = round(val, 10)
-                    if val.is_integer():
-                        val = int(val)
-                elif isinstance(val, complex):
-                    real = round(val.real, 10)
-                    imag = round(val.imag, 10)
-                    if real.is_integer():
-                        real = int(real)
-                    if imag.is_integer():
-                        imag = int(imag)
-                    val = complex(real, imag)
+                val = _safe_round_val(val)
                 results.add(val)
             except ZeroDivisionError:
                 continue
         return results
 
-    # ==================== ABSTRACT AST COMPOSITION OPERATOR '*' ====================
+    # ==================== ABSTRACT AST COMPOSITION OPERATOR ====================
 
     def compose(self, other: Any, operator_fn: Union[Callable, None] = None) -> "UncertainNumber":
-        """
-        Abstract composition method: Joins two AST trees under a custom operator function.
-        Concatenates index domain tuples d_A and d_B to form combined dimension sizes.
-        """
+        """Abstract composition: Joins two AST trees under a custom operator function."""
         if not isinstance(other, UncertainNumber):
             other = UncertainNumber([other])
 
         if operator_fn is None:
             operator_fn = lambda a, b: a * b
 
-        # Concatenate dimension size tuples: d_new = d_A + d_B
         new_d = self.d + other.d
 
         ast_node = {
@@ -794,7 +954,6 @@ class UncertainNumber:
             "space_type": "minkowski",
         }
 
-        # Return new UncertainNumber holding combined AST root and dimension tuple
         res = UncertainNumber(
             generative_fn=lambda idx: res.evaluate_at_index(idx),
             index_domain=new_d,
@@ -830,18 +989,13 @@ class UncertainNumber:
         return False
 
     def flat_index_to_tuple(self, flat_idx: int, zero_based: bool = True) -> Tuple[int, ...]:
-        """
-        Converts a 1D linear integer index into a multi-dimensional scenario index tuple
-        corresponding to index domain 'd' = (n_1, n_2, ..., n_k).
-        Time complexity: O(k) (Pure Lazy Evaluation - avoids computing full Cartesian sets).
-        """
+        """Converts a 1D linear integer index into a multi-dimensional scenario index tuple."""
         if not self.d or self.d == (0,):
             return ()
 
         total_size = math.prod(self.d)
         k0 = flat_idx if zero_based else (flat_idx - 1)
 
-        # Support negative indexing (-1 = last element)
         if k0 < 0:
             k0 += total_size
 
@@ -849,7 +1003,6 @@ class UncertainNumber:
             raise IndexError(f"Index {flat_idx} out of range for UncertainNumber with {total_size} scenarios (domain {self.d}).")
 
         tuple_idx = []
-        # Row-major / odometer decomposition from right to left
         for dim_size in reversed(self.d):
             if dim_size <= 0:
                 tuple_idx.append(1)
@@ -860,10 +1013,7 @@ class UncertainNumber:
         return tuple(reversed(tuple_idx))
 
     def tuple_to_flat_index(self, tuple_idx: Tuple[int, ...], zero_based: bool = True) -> int:
-        """
-        Converts a multi-dimensional index tuple (1-based per dimension) into a 1D linear integer index.
-        Time complexity: O(k).
-        """
+        """Converts a multi-dimensional index tuple into a 1D linear integer index."""
         if len(tuple_idx) != len(self.d):
             raise ValueError(f"Dimension mismatch: expected {len(self.d)} elements, got {len(tuple_idx)}")
 
@@ -876,29 +1026,18 @@ class UncertainNumber:
         return k0 if zero_based else (k0 + 1)
 
     def __len__(self) -> int:
-        """Returns the total number of scenarios N = prod(d)."""
         return math.prod(self.d) if self.d and self.d != (0,) else 0
 
     def __iter__(self):
-        """Allows direct iteration over the evaluated set elements in sorted order."""
-        return iter(sorted(list(self.to_set())))
+        return iter(sorted(list(self.to_set()), key=lambda x: (isinstance(x, complex), str(x))))
 
     def __getitem__(self, index: Any):
-        """
-        Lazy O(k) scenario indexing:
-        - If int: converts flat index -> multi-dimensional tuple index and evaluates f_X(tuple).
-        - If tuple: evaluates directly at the given index tuple f_X(tuple).
-        """
         if isinstance(index, tuple):
             return self.evaluate_at_index(index)
         elif isinstance(index, int):
             tuple_idx = self.flat_index_to_tuple(index, zero_based=True)
             val = self.evaluate_at_index(tuple_idx)
-            if isinstance(val, float):
-                val = round(val, 10)
-                if val.is_integer():
-                    val = int(val)
-            return val
+            return _safe_round_val(val)
         elif isinstance(index, slice):
             total_size = len(self)
             start, stop, step = index.indices(total_size)
@@ -907,9 +1046,7 @@ class UncertainNumber:
             raise TypeError(f"UncertainNumber indices must be integers or tuples, not {type(index).__name__}")
 
     def get_formula(self, var_names: Union[List[str], Tuple[str, ...], None] = None) -> str:
-        """
-        Returns the symbolic mathematical formula f(x_1, x_2, ...) of the generative function.
-        """
+        """Returns the symbolic mathematical formula f(x_1, x_2, ...) of the generative function."""
         num_vars = len(self.d) if self.d and self.d != (0,) else 1
         if var_names is None:
             if num_vars == 1 and self.ast.get("type") == "leaf":
@@ -956,7 +1093,7 @@ class UncertainNumber:
 
     @property
     def formula(self) -> str:
-        """Returns the canonical form formula representation: f(x_1, ...) = ..."""
+        """Returns the canonical form formula representation."""
         num_vars = len(self.d) if self.d and self.d != (0,) else 1
         if num_vars == 1 and self.ast.get("type") == "leaf":
             var_names = ["x"]
@@ -982,36 +1119,30 @@ class UncertainNumber:
                 list(s),
                 key=lambda x: (
                     1 if isinstance(x, UncertainNumber) else 0,
-                    x.to_set_key() if isinstance(x, UncertainNumber) else x,
+                    x.to_set_key() if isinstance(x, UncertainNumber) else str(x),
                 ),
             )
             inner = ", ".join(repr(x) if isinstance(x, UncertainNumber) else str(x) for x in sorted_items)
             return f"{{{inner}}}_u"
         except Exception:
             return f"UncertainNumber(d={self.d})"
-    
+
     def print_model(self):
         print(f"d={self.d}\nf={self.formula}")
 
     @property
     def index_length(self):
-        """Calculates the total number of scenarios (product of dimension sizes)."""
+        """Calculates the total number of scenarios."""
         return math.prod(self.d)
 
     def contains(self, target: Any, rel_tol: float = 1e-7, abs_tol: float = 1e-9) -> bool:
         """
-        Kiểm tra một phần tử 'target' có thuộc số bất định hay không bằng cách giải phương trình
-        nghịch đảo trên cây AST của công thức (AST Equation Solving).
-        
-        Độ phức tạp: O(k) hoặc O(depth) - Không cần sinh tích Descartes (Lazy Evaluation).
+        Kiểm tra một phần tử 'target' có thuộc số bất định hay không.
+        An toàn với số nguyên siêu lớn.
         """
         return _solve_ast_membership(self, target, rel_tol=rel_tol, abs_tol=abs_tol)
 
     def __contains__(self, item: Any) -> bool:
-        """
-        Cho phép sử dụng toán tử `in` của Python (ví dụ: `x in U`) để kiểm tra phần tử
-        thuộc số bất định thông qua bộ giải phương trình trên cây AST.
-        """
         return self.contains(item)
 
     def solve_equation(
@@ -1019,11 +1150,7 @@ class UncertainNumber:
         target: Any = 0,
         var_names: Union[List[str], Tuple[str, ...], None] = None,
     ) -> List[Tuple[int, ...]]:
-        """
-        Giải phương trình f(x_1, x_2, ..., x_k) = target trên cây AST của formula.
-        Tìm tập các bộ chỉ số kịch bản hợp lệ (i_1, ..., i_k) trong miền d thỏa mãn f(i_1, ...) == target.
-        Sử dụng SymPy solver hoặc duyệt trên cây AST kết hợp ràng buộc miền chỉ số.
-        """
+        """Giải phương trình f(x_1, x_2, ..., x_k) = target trên cây AST."""
         num_vars = len(self.d) if self.d and self.d != (0,) else 1
         if var_names is None:
             if num_vars == 1 and self.ast.get("type") == "leaf":
@@ -1072,42 +1199,22 @@ class UncertainNumber:
     def __str__(self):
         return self.__repr__()
 
-    # ==================== FUNCTIONAL SPACE OPERATORS (LAMBDAS) ====================
+    # ==================== FUNCTIONAL SPACE OPERATORS ====================
 
     @staticmethod
     def pw(fn: Callable, *args: Any) -> "UncertainNumber":
-        """
-        Executes a lambda function across arguments in Point-wise Space (o)_1.
-        Preserves internal variable identity: all occurrences share the identical point value.
-        Example: UncertainNumber.pw(lambda x: x**2 - 3*x + 2, X)
-        """
         return pw(fn, *args)
 
     @staticmethod
     def epw(fn: Callable, *args: Any) -> "UncertainNumber":
-        """
-        Executes a lambda function across arguments in Extended Point-wise Space (o)_1'.
-        Allows broadcasting with scalar values or (1,) domain dimensions.
-        Example: UncertainNumber.epw(lambda x, c: x * c, X, 10)
-        """
         return epw(fn, *args)
 
     @staticmethod
     def m(fn: Callable, *args: Any) -> "UncertainNumber":
-        """
-        Executes a lambda function across arguments in Minkowski Space (o)_m.
-        Constructs Cartesian product domain d_1 x d_2 x ... for independent interaction.
-        Example: UncertainNumber.m(lambda a, b: a + b, A, B)
-        """
         return m(fn, *args)
 
     @staticmethod
     def em(fn: Callable, *args: Any) -> "UncertainNumber":
-        """
-        Executes a lambda function across arguments in Extended Minkowski Space (o)_m'.
-        Supports inverse equation solving and fractional powers.
-        Example: UncertainNumber.em(lambda c, x: c * x, 10, X)
-        """
         return em(fn, *args)
 
 
@@ -1248,7 +1355,7 @@ def _make_pw_bin(op_sym: str, left: Any, right: Any, op_fn: Callable) -> _PwExpr
 
 def pw(fn: Callable, *args: Any) -> UncertainNumber:
     """
-    Point-wise Space (o)_1 functional operator for lambdas with UncertainNumber parameters.
+    Point-wise Space (o)_1 functional operator.
     Definition 3.2: (f)_1(A) := {f(x) : x in A}_u
     """
     if not args:
@@ -1285,7 +1392,7 @@ def pw(fn: Callable, *args: Any) -> UncertainNumber:
             )
         elif isinstance(res_expr, UncertainNumber):
             return res_expr
-        elif isinstance(res_expr, (int, float, complex)):
+        elif isinstance(res_expr, (int, float, complex, Fraction)):
             return UncertainNumber({res_expr})
     except Exception:
         pass
@@ -1300,7 +1407,7 @@ def pw(fn: Callable, *args: Any) -> UncertainNumber:
 
 def epw(fn: Callable, *args: Any) -> UncertainNumber:
     """
-    Extended Point-wise Space (o)_1' functional operator for lambdas.
+    Extended Point-wise Space (o)_1' functional operator.
     Supports broadcasting between scalars and multi-element UncertainNumbers.
     """
     if not args:
@@ -1341,7 +1448,7 @@ def epw(fn: Callable, *args: Any) -> UncertainNumber:
             )
         elif isinstance(res_expr, UncertainNumber):
             return res_expr
-        elif isinstance(res_expr, (int, float, complex)):
+        elif isinstance(res_expr, (int, float, complex, Fraction)):
             return UncertainNumber({res_expr})
     except Exception:
         pass
@@ -1358,33 +1465,25 @@ def epw(fn: Callable, *args: Any) -> UncertainNumber:
 
 def m(fn: Callable, *args: Any) -> UncertainNumber:
     """
-    Minkowski Space (o)_m functional operator for lambdas with UncertainNumber parameters.
-    Evaluates algebraic operations across independent Minkowski scenarios.
+    Minkowski Space (o)_m functional operator.
     """
     if not args:
         return UncertainNumber({fn()})
 
     unc_args = [_to_unc(a) for a in args]
 
-    # Try evaluating with UncertainNumber instances directly to leverage overloaded Minkowski operators.
-    # IMPORTANT: skip this fast-path if fn merely returns one of its input objects (e.g. max/min
-    # comparing UncertainNumber objects via __lt__ and returning one of them unchanged).  In that
-    # case we must fall through to the Cartesian scalar evaluation so that fn is applied element-wise
-    # to produce {f(a, b) : a ∈ A, b ∈ B}.
     try:
         res = fn(*unc_args)
         if isinstance(res, UncertainNumber):
-            # If the result is literally one of the input objects, this fast-path is not appropriate.
             if any(res is u for u in unc_args):
-                pass  # fall through to Cartesian evaluation below
+                pass  # fall through
             else:
                 return res
-        elif isinstance(res, (int, float, complex, set, list, tuple)):
+        elif isinstance(res, (int, float, complex, Fraction, set, list, tuple)):
             return _to_unc(res)
     except Exception:
         pass
 
-    # Fallback to Cartesian scalar evaluation across all input scenarios
     new_d = sum((u.d for u in unc_args), ())
 
     def generative_fn(idx_tuple: Any) -> Numeric:
@@ -1394,7 +1493,7 @@ def m(fn: Callable, *args: Any) -> UncertainNumber:
         curr = 0
         for u in unc_args:
             dim = len(u.d)
-            sub_idx = idx_tuple[curr : curr + dim]
+            sub_idx = idx_tuple[curr: curr + dim]
             curr += dim
             arg_vals.append(u.evaluate_at_index(sub_idx))
         return fn(*arg_vals)
@@ -1408,60 +1507,47 @@ def m(fn: Callable, *args: Any) -> UncertainNumber:
 
 def em(fn: Callable, *args: Any) -> UncertainNumber:
     """
-    Extended Minkowski Space (o)_m' functional operator for lambdas.
-    Dispatches to Extended Minkowski equation solving engine for scalars,
-    or falls back to Cartesian Minkowski evaluation.
-
-    Supports single-argument lambdas that encode scalar multiplication or
-    power operations, e.g.:
-        em(lambda A: 0.5 * A, A)   ->  (1/2 * A)_{m'}
-        em(lambda A: A ** 0.5, A)  ->  (A^{1/2})_{m'}
+    Extended Minkowski Space (o)_m' functional operator.
     """
     if not args:
         return UncertainNumber({fn()})
 
     unc_args = [_to_unc(a) for a in args]
 
-    # Check for 2-argument scalar operations suitable for EMinkowskiArithmetic
     if len(unc_args) == 2:
         from .EMinkowskiArithmetic import EMinkowskiArithmetic
         if unc_args[0].d == (1,) or unc_args[1].d == (1,):
             return EMinkowskiArithmetic.em(unc_args[0], unc_args[1], fn)
 
-    # Handle single-argument lambdas of the form fn(A) = scalar * A or fn(A) = A ** scalar.
-    # Probe fn with a scalar value to detect the hidden scalar operand.
     if len(unc_args) == 1:
         from .EMinkowskiArithmetic import EMinkowskiArithmetic
         unc_target = unc_args[0]
-        probe = 4.0  # arbitrary non-trivial probe value
+        probe = 4
 
-        # Detect scalar multiplication: fn(x) = c * x  =>  fn(probe)/probe == constant
         try:
             result_mul = fn(probe)
-            if isinstance(result_mul, (int, float)) and probe != 0:
-                scalar_val = result_mul / probe
-                # Verify: fn(probe2) / probe2 == same constant
-                probe2 = 9.0
+            if isinstance(result_mul, (int, float, Fraction)) and probe != 0:
+                scalar_val = Fraction(result_mul, probe) if isinstance(result_mul, int) else result_mul / probe
+                probe2 = 9
                 result_mul2 = fn(probe2)
-                if isinstance(result_mul2, (int, float)) and abs(result_mul2 / probe2 - scalar_val) < 1e-9:
-                    # Confirmed: fn is a scalar multiplication by scalar_val
-                    scalar_unc = UncertainNumber({scalar_val})
-                    return EMinkowskiArithmetic.em(scalar_unc, unc_target, lambda x, y: x * y)
+                if isinstance(result_mul2, (int, float, Fraction)):
+                    sv2 = Fraction(result_mul2, probe2) if isinstance(result_mul2, int) else result_mul2 / probe2
+                    if _approx_eq(sv2, scalar_val):
+                        scalar_unc = UncertainNumber({scalar_val})
+                        return EMinkowskiArithmetic.em(scalar_unc, unc_target, lambda x, y: x * y)
         except Exception:
             pass
 
-        # Detect power operation: fn(x) = x ** p  =>  log(fn(probe)) / log(probe) == p
-        import math
         try:
             result_pow = fn(probe)
             if isinstance(result_pow, (int, float)) and probe > 0 and result_pow > 0:
-                p_val = math.log(result_pow) / math.log(probe)
-                probe2 = 9.0
+                import math as _math
+                p_val = _math.log(result_pow) / _math.log(probe)
+                probe2 = 9
                 result_pow2 = fn(probe2)
                 if isinstance(result_pow2, (int, float)) and result_pow2 > 0:
-                    p_val2 = math.log(result_pow2) / math.log(probe2)
+                    p_val2 = _math.log(result_pow2) / _math.log(probe2)
                     if abs(p_val2 - p_val) < 1e-9:
-                        # Confirmed: fn is a power operation x ** p_val
                         power_unc = UncertainNumber({p_val})
                         return EMinkowskiArithmetic.em(unc_target, power_unc, lambda x, y: x ** y)
         except Exception:
