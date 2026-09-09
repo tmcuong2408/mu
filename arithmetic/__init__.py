@@ -1,4 +1,4 @@
-from .UncertainNumber import UncertainNumber, pw, epw, m, em
+from .UncertainNumber import UncertainNumber, pw, epw, m, em, s
 from .Arithmetic import Arithmetic
 from .PointwiseArithmetic import PointwiseArithmetic
 from .EPointwiseArithmetic import EPointwiseArithmetic
@@ -18,5 +18,7 @@ __all__ = [
     "epw",
     "m",
     "em",
+    "s",
     "__version__",
 ]
+

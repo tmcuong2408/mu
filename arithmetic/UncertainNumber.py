@@ -1217,13 +1217,17 @@ class UncertainNumber:
     def em(fn: Callable, *args: Any) -> "UncertainNumber":
         return em(fn, *args)
 
+    @staticmethod
+    def s(*args: Any, **kwargs: Any) -> "UncertainNumber":
+        return s(*args, **kwargs)
+
 
 # ==================== MODULE-LEVEL CONVENIENCE FUNCTIONS ====================
 
 def _to_unc(val: Any) -> UncertainNumber:
     if isinstance(val, UncertainNumber):
         return val
-    if isinstance(val, (set, list, tuple)):
+    if isinstance(val, (set, list, tuple, range)):
         return UncertainNumber(val)
     return UncertainNumber({val})
 
@@ -1554,3 +1558,56 @@ def em(fn: Callable, *args: Any) -> UncertainNumber:
             pass
 
     return m(fn, *unc_args)
+
+
+def s(*args: Any, **kwargs: Any) -> UncertainNumber:
+    """
+    Khởi tạo nhanh số bất định (UncertainNumber).
+
+    Cách sử dụng:
+        s(1, 2, 3)              -> UncertainNumber({1, 2, 3})
+        s({1, 2, 3})            -> UncertainNumber({1, 2, 3})
+        s([1, 2, 3])            -> UncertainNumber([1, 2, 3])
+        s((1, 2, 3))            -> UncertainNumber((1, 2, 3))
+        s(range(1, 10))         -> UncertainNumber(range(1, 10))
+        s(5)                    -> UncertainNumber({5})
+        s("{1, 2, 3}")          -> UncertainNumber({1, 2, 3})
+        s("1, 2, 3")            -> UncertainNumber({1, 2, 3})
+        s()                     -> UncertainNumber(set())
+    """
+    if kwargs:
+        return UncertainNumber(*args, **kwargs)
+
+    if not args:
+        return UncertainNumber(set())
+
+    if len(args) == 1:
+        val = args[0]
+        if isinstance(val, UncertainNumber):
+            return val
+        if isinstance(val, (set, list, tuple, range)):
+            return UncertainNumber(val)
+        if isinstance(val, str):
+            cleaned = val.strip()
+            if (cleaned.startswith("{") and cleaned.endswith("}")) or \
+               (cleaned.startswith("[") and cleaned.endswith("]")) or \
+               (cleaned.startswith("(") and cleaned.endswith(")")):
+                cleaned = cleaned[1:-1].strip()
+            if not cleaned:
+                return UncertainNumber(set())
+            tokens = [t.strip() for t in cleaned.replace(",", " ").split() if t.strip()]
+            parsed = []
+            for t in tokens:
+                try:
+                    if "/" in t:
+                        parsed.append(Fraction(t))
+                    elif "." in t or "e" in t.lower():
+                        parsed.append(float(t))
+                    else:
+                        parsed.append(int(t))
+                except Exception:
+                    parsed.append(t)
+            return UncertainNumber(parsed)
+        return UncertainNumber({val})
+
+    return UncertainNumber(list(args))
