@@ -5,6 +5,8 @@ from .EPointwiseArithmetic import EPointwiseArithmetic
 from .MinkowskiArithmetic import MinkowskiArithmetic
 from .EMinkowskiArithmetic import EMinkowskiArithmetic
 
+__version__ = "0.1.0"
+
 __all__ = [
     "UncertainNumber",
     "Arithmetic",
@@ -16,4 +18,5 @@ __all__ = [
     "epw",
     "m",
     "em",
+    "__version__",
 ]
