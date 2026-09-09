@@ -1122,6 +1122,9 @@ class UncertainNumber:
                     x.to_set_key() if isinstance(x, UncertainNumber) else str(x),
                 ),
             )
+            if len(sorted_items) == 1:
+                item = sorted_items[0]
+                return repr(item) if isinstance(item, UncertainNumber) else str(item)
             inner = ", ".join(repr(x) if isinstance(x, UncertainNumber) else str(x) for x in sorted_items)
             return f"{{{inner}}}_u"
         except Exception:
