@@ -1197,6 +1197,12 @@ class UncertainNumber:
         return []
 
     def __str__(self):
+        try:
+            s = self.to_set()
+            if len(s) == 1:
+                return str(next(iter(s)))
+        except Exception:
+            pass
         return self.__repr__()
 
     # ==================== FUNCTIONAL SPACE OPERATORS ====================
