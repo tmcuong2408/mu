@@ -1738,24 +1738,16 @@ def epw(fn: Callable, *args: Any) -> UncertainNumber:
 def m(fn: Callable, *args: Any) -> UncertainNumber:
     """
     Minkowski Space (o)_m functional operator.
+
+    Định nghĩa tổng quát: với hàm vô hướng f(a, b, ...) trên số thực/phức,
+    lift lên không gian Minkowski:
+        m(f, A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }
+    Miền chỉ số mới là tích Descartes d_A × d_B × ...
     """
     if not args:
         return UncertainNumber({fn()})
 
     unc_args = [_to_unc(a) for a in args]
-
-    try:
-        res = fn(*unc_args)
-        if isinstance(res, UncertainNumber):
-            if any(res is u for u in unc_args):
-                pass  # fall through
-            else:
-                return res
-        elif isinstance(res, (int, float, complex, Fraction, set, list, tuple)):
-            return _to_unc(res)
-    except Exception:
-        pass
-
     new_d = sum((u.d for u in unc_args), ())
 
     def generative_fn(idx_tuple: Any) -> Numeric:

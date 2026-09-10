@@ -1,5 +1,5 @@
 from .UncertainNumber import UncertainNumber, WeakRelation, weak_relation, mu, pw, epw, m, em, s
-from .Arithmetic import Arithmetic
+from .Arithmetic import Arithmetic, lift_m
 from .PointwiseArithmetic import PointwiseArithmetic
 from .EPointwiseArithmetic import EPointwiseArithmetic
 from .MinkowskiArithmetic import MinkowskiArithmetic
@@ -22,6 +22,7 @@ __all__ = [
     "m",
     "em",
     "s",
+    "lift_m",
     "__version__",
 ]
 

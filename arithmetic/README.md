@@ -81,3 +81,49 @@ B = UncertainNumber({1, 2}, weights={1: 0.5, 2: 0.5})
 # Tổng mu = 0.1 + 0.1 + 0.4 = 0.6
 print(A <= B)       # 0.6
 print(A.mu("<=", B)) # 0.6
+```
+
+## Minkowski Lifting — Kế thừa hàm vô hướng lên không gian Minkowski
+
+Định nghĩa tổng quát **(o)\_m**: với hàm vô hướng `f(a, b, ...)` trên số thực/phức, kế thừa lên không gian Minkowski:
+
+$$f(A, B, \ldots) = \{f(a, b, \ldots) : a \in A,\ b \in B,\ \ldots\}$$
+
+Miền chỉ số mới là tích Descartes $d_A \times d_B \times \cdots$, hàm sinh $f(i, j, \ldots) = f(A[i],\, B[j], \ldots)$.
+
+Sau khi `import arithmetic`, các hàm `max()` và `min()` builtin của Python được **tự động override** để tuân thủ định nghĩa này. Mọi hàm vô hướng khác đều có thể lift thủ công bằng `lift_m`.
+
+```python
+from arithmetic import s, lift_m, m
+import math
+
+a = s(1, 2, 4, 6, 7, 8, 9, 20, 100)
+b = s(1, 2)
+
+# max(A, B) = { max(a, b) : a ∈ A, b ∈ B }
+print(max(a, b))   # {2, 4, 6, 7, 8, 9, 20, 100}_u  ✓ (không phải {1, 2}_u sai)
+
+# min(A, B) = { min(a, b) : a ∈ A, b ∈ B }
+print(min(a, b))   # {1, 2}_u
+
+# max/min vẫn hoạt động bình thường với số thực:
+print(max(3, 7))   # 7
+print(min(3, 7))   # 3
+
+# Lift hàm vô hướng bất kỳ với lift_m(f, A, B, ...):
+#   lift_m(f, A, B) = { f(a, b) : a ∈ A, b ∈ B }
+
+print(lift_m(math.gcd, a, b))    # { gcd(x, y) : x ∈ a, y ∈ b }
+print(lift_m(math.hypot, a, b))  # { hypot(x, y) : x ∈ a, y ∈ b }
+print(lift_m(pow, a, b))         # { x^y : x ∈ a, y ∈ b }
+
+# Tương đương — m() cũng là Minkowski lifting tổng quát:
+print(m(math.gcd, a, b))         # như lift_m(math.gcd, a, b)
+```
+
+| Hàm | Mô tả |
+|-----|-------|
+| `max(A, B)` | `{max(a,b) : a∈A, b∈B}` — override tự động sau `import arithmetic` |
+| `min(A, B)` | `{min(a,b) : a∈A, b∈B}` — override tự động sau `import arithmetic` |
+| `lift_m(f, A, B, ...)` | `{f(a,b,...) : a∈A, b∈B, ...}` — lift hàm vô hướng bất kỳ |
+| `m(f, A, B, ...)` | Tương đương `lift_m`, hỗ trợ cả lambda và hàm có tên |
