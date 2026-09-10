@@ -94,6 +94,7 @@ print(f"mu(A_rel, B_rel, '<=') = {val_mu_mod}")  # 0.75
 <p>
 bench: Verify $10^{18}$ scenario scale with $\mathcal{O}(1)$ RAM and $\mathcal{O}(k)$ latency
 </p>
+```
 
 ```python
 import sys
