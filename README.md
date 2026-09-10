@@ -14,7 +14,14 @@ https://doi.org/10.5281/zenodo.22031881
 * **Phone:** (+84) 353-237-140
 * **Location:** DJ7 Street, Thoi Hoa, Ho Chi Minh City, Vietnam
 
-```python
+## Libraries Architecture
+The **MU (Mathematics of Uncertainty)** project consists of 3 dedicated libraries:
+1. **`arithmetic/`**: Uncertain number representations (`UncertainNumber`) and arithmetic spaces (Pointwise, Minkowski, Extended spaces).
+2. **`algebra/`**: Algebraic structures for uncertainty mathematics (groups, rings, fields, vector spaces).
+3. **`analysis/`**: Mathematical analysis for uncertain functions (limits, continuity, derivatives, integrals).
+
+## Quick Start: Arithmetic
+
 from arithmetic import UncertainNumber, Arithmetic
 from arithmetic import pw, epw, m, em
 

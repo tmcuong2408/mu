@@ -11,7 +11,6 @@ from .EMinkowskiArithmetic import EMinkowskiArithmetic
 # Type alias for numeric types
 Numeric = Union[int, float, complex]
 
-
 class Arithmetic:
     """
     Master Operator Overloading Engine.

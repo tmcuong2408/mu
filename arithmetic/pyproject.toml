@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Mathematics of Uncertainty: Uncertain number arithmetic and arithmetic spaces"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "Trần Mạnh Cường", email = "tmcuong2408@gmail.com" }
 ]
@@ -25,7 +25,8 @@ dev = [
     "pytest",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["arithmetic*"]
-exclude = ["TEST*", "arithmetic.UnitTest*"]
+[tool.setuptools]
+packages = ["arithmetic"]
+
+[tool.setuptools.package-dir]
+arithmetic = "."
