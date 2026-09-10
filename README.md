@@ -21,7 +21,7 @@ The **MU (Mathematics of Uncertainty)** project consists of 3 dedicated librarie
 3. **`analysis/`**: Mathematical analysis for uncertain functions (limits, continuity, derivatives, integrals).
 
 ## Quick Start: Arithmetic
-
+```python
 from arithmetic import UncertainNumber, Arithmetic
 from arithmetic import pw, epw, m, em
 
