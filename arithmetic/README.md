@@ -44,10 +44,9 @@ Y = UncertainNumber({2, 3, 4})
 res_em_half = Arithmetic.mul(0.5, Y, space="em")
 print(f"(0.5 * {{2, 3, 4}})_em = {res_em_half}")
 
-# 5. Sử dụng hàm pw, epw, m, em với đầu vào lambda:
+# 5. Sử dụng hàm pw, epw, m, em với đầu vào lambda:python
 f_pw = pw(lambda x: x**2 + 5*x + 6, X)
 print(f"pw(lambda x: x^2 + 5x + 6, X) = {f_pw}")
-
 # 6. Quan hệ hai ngôi yếu và lấy giá trị chân lý với hàm mu:
 from arithmetic import mu
 
