@@ -60,5 +60,24 @@ print(f"A.mu('<=', B) = {val}")  # 0.75
 # Hoặc gọi qua hàm cấp module:
 val_mod = mu(A, B, "<=")
 print(f"mu(A, B, '<=') = {val_mod}")  # 0.75
-```
 
+
+
+# Cách khởi tạo số bất định có trọng số
+
+from arithmetic import UncertainNumber
+
+# A: 1 có trọng số 0.2, 2 có trọng số 0.8
+A = UncertainNumber({1, 2}, weights={1: 0.2, 2: 0.8})
+
+# B: 1 có trọng số 0.5, 2 có trọng số 0.5
+B = UncertainNumber({1, 2}, weights={1: 0.5, 2: 0.5})
+
+# Tính mu(A <= B)
+# Cặp (1,1): 1 <= 1 -> 0.2 * 0.5 = 0.1
+# Cặp (1,2): 1 <= 2 -> 0.2 * 0.5 = 0.1
+# Cặp (2,1): 2 <= 1 -> 0
+# Cặp (2,2): 2 <= 2 -> 0.8 * 0.5 = 0.4
+# Tổng mu = 0.1 + 0.1 + 0.4 = 0.6
+print(A <= B)       # 0.6
+print(A.mu("<=", B)) # 0.6
