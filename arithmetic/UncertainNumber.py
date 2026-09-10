@@ -702,6 +702,205 @@ def _solve_ast_membership(
     return False
 
 
+# ==================== WEAK BINARY RELATION (QUAN HỆ HAI NGÔI YẾU) ====================
+
+class WeakRelation(float):
+    """
+    Biểu diễn kết quả của quan hệ hai ngôi yếu ARB với giá trị chân lý mu(ARB).
+    Kế thừa từ float để hoàn toàn tương thích với các phép tính số học và so sánh số thực.
+    Định nghĩa 2.8 & 2.17 trong tài liệu 'Logic Mở Rộng Và Toán Học Bất Định'.
+    """
+
+    def __new__(
+        cls,
+        truth_value: Union[float, Fraction],
+        left: Any = None,
+        relation: str = "<=",
+        right: Any = None,
+    ):
+        tv_float = float(truth_value)
+        instance = super().__new__(cls, tv_float)
+        instance.truth_value = truth_value
+        instance.mu = truth_value
+        instance.left = left
+        instance.relation = relation
+        instance.right = right
+        return instance
+
+    @property
+    def is_certain(self) -> bool:
+        """Trả về True nếu chân lý đạt tuyệt đối 1 (hoặc 1.0)."""
+        return self.truth_value == 1
+
+    def __repr__(self) -> str:
+        fl = float(self)
+        return str(fl)
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    def detail(self) -> str:
+        """Trả về biểu thức chi tiết kèm ký hiệu quan hệ, ví dụ: ({1, 2}_u <= {1, 2}_u)_0.75."""
+        tv_val = self.truth_value
+        if isinstance(tv_val, Fraction) and tv_val.denominator == 1:
+            tv_str = str(tv_val.numerator)
+        elif isinstance(tv_val, float) and tv_val.is_integer():
+            tv_str = str(int(tv_val))
+        elif isinstance(tv_val, Fraction):
+            fl = float(tv_val)
+            if abs(Fraction(fl).limit_denominator(10**12) - tv_val) < 1e-12:
+                tv_str = f"{fl:g}"
+            else:
+                tv_str = str(tv_val)
+        else:
+            tv_str = f"{float(tv_val):g}"
+
+        left_str = repr(self.left) if self.left is not None else ""
+        right_str = repr(self.right) if self.right is not None else ""
+        op_str = self.relation if isinstance(self.relation, str) else getattr(self.relation, "__name__", "R")
+        return f"({left_str} {op_str} {right_str})_{tv_str}"
+
+
+def _get_distinct_elements(unc: Any) -> List[Any]:
+    """Lấy danh sách các phần tử phân biệt của số bất định."""
+    try:
+        s = unc.to_set()
+        data = list(s)
+        try:
+            return sorted(data, key=lambda x: (
+                isinstance(x, complex),
+                float(x.real) if isinstance(x, complex) else float(x) if isinstance(x, (int, float, Fraction, Decimal)) else 0
+            ))
+        except Exception:
+            return data
+    except Exception:
+        if hasattr(unc, "elements") and unc.elements is not None:
+            return list(unc.elements)
+        total = math.prod(unc.d) if hasattr(unc, "d") and unc.d else 0
+        if total <= 10000:
+            return [unc.evaluate_at_index(unc.flat_index_to_tuple(i)) for i in range(total)]
+        return []
+
+
+def _normalize_weight_fn(
+    unc: Any, elems: List[Any], weights: Any
+) -> Callable[[Any], Union[float, Fraction]]:
+    """Chuẩn hóa hàm trọng số cho các phần tử của số bất định (Định nghĩa 2.15, 2.16)."""
+    if weights is None:
+        weights = getattr(unc, "weights", None)
+    if weights is None:
+        n = len(elems)
+        if n == 0:
+            return lambda x: Fraction(0)
+        frac_w = Fraction(1, n)
+        return lambda x: frac_w
+    if isinstance(weights, dict):
+        return lambda x: weights.get(x, Fraction(0))
+    if callable(weights):
+        return weights
+    if isinstance(weights, (list, tuple)):
+        elem_map = {elem: w for elem, w in zip(elems, weights)}
+        return lambda x: elem_map.get(x, Fraction(0))
+    return lambda x: Fraction(1, len(elems)) if elems else Fraction(0)
+
+
+def _compute_weak_relation(
+    a_unc: Any,
+    b_unc: Any,
+    relation: Union[str, Callable[[Any, Any], bool]],
+    weights_a: Any = None,
+    weights_b: Any = None,
+) -> WeakRelation:
+    """
+    Tính toán quan hệ hai ngôi yếu mu(ARB) theo Định nghĩa 2.8 và 2.17.
+    """
+    elems_a = _get_distinct_elements(a_unc)
+    elems_b = _get_distinct_elements(b_unc)
+
+    n = len(elems_a)
+    m = len(elems_b)
+    total_pairs = n * m
+
+    op_str = relation if isinstance(relation, str) else getattr(relation, "__name__", "R")
+
+    if total_pairs == 0:
+        return WeakRelation(Fraction(0), a_unc, op_str, b_unc)
+
+    has_custom_weights = (
+        weights_a is not None
+        or weights_b is not None
+        or getattr(a_unc, "weights", None) is not None
+        or getattr(b_unc, "weights", None) is not None
+    )
+
+    standard_ops = {
+        "<=": "<=", "le": "<=",
+        "<": "<", "lt": "<",
+        ">=": ">=", "ge": ">=",
+        ">": ">", "gt": ">",
+        "==": "==", "=": "==", "eq": "==",
+        "!=": "!=", "<>": "!=", "ne": "!=",
+    }
+
+    canonical_op = standard_ops.get(relation.lower()) if isinstance(relation, str) else None
+
+    # Tối ưu hóa bằng tìm kiếm nhị phân cho các quan hệ thứ tự chuẩn khi không có trọng số riêng
+    if (
+        not has_custom_weights
+        and canonical_op is not None
+        and all(isinstance(x, (int, float, Fraction, Decimal)) and not isinstance(x, bool) for x in elems_a)
+        and all(isinstance(y, (int, float, Fraction, Decimal)) and not isinstance(y, bool) for y in elems_b)
+    ):
+        b_sorted = sorted(elems_b)
+        count = 0
+        if canonical_op == "<=":
+            count = sum(m - bisect.bisect_left(b_sorted, x) for x in elems_a)
+        elif canonical_op == "<":
+            count = sum(m - bisect.bisect_right(b_sorted, x) for x in elems_a)
+        elif canonical_op == ">=":
+            count = sum(bisect.bisect_right(b_sorted, x) for x in elems_a)
+        elif canonical_op == ">":
+            count = sum(bisect.bisect_left(b_sorted, x) for x in elems_a)
+        elif canonical_op == "==":
+            count = sum(bisect.bisect_right(b_sorted, x) - bisect.bisect_left(b_sorted, x) for x in elems_a)
+        elif canonical_op == "!=":
+            eq_count = sum(bisect.bisect_right(b_sorted, x) - bisect.bisect_left(b_sorted, x) for x in elems_a)
+            count = total_pairs - eq_count
+
+        truth_val = Fraction(count, total_pairs)
+        return WeakRelation(truth_val, a_unc, canonical_op, b_unc)
+
+    # Đường tính tổng quát (hỗ trợ trọng số hoặc quan hệ bất kỳ)
+    if canonical_op == "<=":
+        op_fn = lambda x, y: x <= y
+    elif canonical_op == "<":
+        op_fn = lambda x, y: x < y
+    elif canonical_op == ">=":
+        op_fn = lambda x, y: x >= y
+    elif canonical_op == ">":
+        op_fn = lambda x, y: x > y
+    elif canonical_op == "==":
+        op_fn = lambda x, y: x == y
+    elif canonical_op == "!=":
+        op_fn = lambda x, y: x != y
+    elif callable(relation):
+        op_fn = relation
+    else:
+        raise ValueError(f"Unsupported relation: {relation}")
+
+    w_a = _normalize_weight_fn(a_unc, elems_a, weights_a)
+    w_b = _normalize_weight_fn(b_unc, elems_b, weights_b)
+
+    total_truth = sum(
+        w_a(x) * w_b(y)
+        for x in elems_a
+        for y in elems_b
+        if op_fn(x, y)
+    )
+
+    return WeakRelation(total_truth, a_unc, op_str, b_unc)
+
+
 class UncertainNumber:
     """
     Represents an Uncertain Number U(K) defined strictly via its Canonical Form (f_X, d_X).
@@ -714,7 +913,9 @@ class UncertainNumber:
         generative_fn: Union[Callable, None] = None,
         index_domain: Union[Tuple[int, ...], None] = None,
         ast_node: Union[dict, None] = None,
+        weights: Union[dict, list, tuple, Callable, None] = None,
     ):
+        self.weights = weights
         if data is not None:
             if isinstance(data, range):
                 n = len(data)
@@ -978,15 +1179,73 @@ class UncertainNumber:
     def __hash__(self):
         return hash(self.to_set_key())
 
-    def __eq__(self, other: Any) -> bool:
+    def is_identical(self, other: Any) -> bool:
+        """Kiểm tra tính đồng nhất về cấu trúc/tập hợp kịch bản giữa hai số bất định."""
         if isinstance(other, UncertainNumber):
             return self.to_set_key() == other.to_set_key()
         return False
 
-    def __lt__(self, other: Any) -> bool:
-        if isinstance(other, UncertainNumber):
-            return str(self) < str(other)
-        return False
+    def __le__(self, other: Any) -> "WeakRelation":
+        return _compute_weak_relation(self, _to_unc(other), "<=")
+
+    def __lt__(self, other: Any) -> "WeakRelation":
+        return _compute_weak_relation(self, _to_unc(other), "<")
+
+    def __ge__(self, other: Any) -> "WeakRelation":
+        return _compute_weak_relation(self, _to_unc(other), ">=")
+
+    def __gt__(self, other: Any) -> "WeakRelation":
+        return _compute_weak_relation(self, _to_unc(other), ">")
+
+    def __eq__(self, other: Any) -> "WeakRelation":
+        return _compute_weak_relation(self, _to_unc(other), "==")
+
+    def __ne__(self, other: Any) -> "WeakRelation":
+        return _compute_weak_relation(self, _to_unc(other), "!=")
+
+    def weak_relation(
+        self,
+        other: Any = None,
+        relation: Union[str, Callable[[Any, Any], bool]] = "<=",
+        weights_self: Any = None,
+        weights_other: Any = None,
+    ) -> "WeakRelation":
+        """
+        Tính toán quan hệ hai ngôi yếu mu(ARB) giữa hai số bất định.
+        Định nghĩa 2.8 & Định nghĩa 2.17.
+        Hỗ trợ cả hai dạng:
+            A.weak_relation(B, "<=")
+            A.weak_relation("<=", B)
+        """
+        if isinstance(other, str) or (callable(other) and not isinstance(other, UncertainNumber)):
+            actual_rel = other
+            actual_other = relation if relation != "<=" else self
+        else:
+            actual_other = other if other is not None else self
+            actual_rel = relation
+
+        return _compute_weak_relation(
+            self,
+            _to_unc(actual_other),
+            actual_rel,
+            weights_a=weights_self,
+            weights_b=weights_other,
+        )
+
+    def mu(
+        self,
+        other: Any = None,
+        relation: Union[str, Callable[[Any, Any], bool]] = "<=",
+        weights_self: Any = None,
+        weights_other: Any = None,
+    ) -> "WeakRelation":
+        """Alias cho weak_relation."""
+        return self.weak_relation(
+            other=other,
+            relation=relation,
+            weights_self=weights_self,
+            weights_other=weights_other,
+        )
 
     def flat_index_to_tuple(self, flat_idx: int, zero_based: bool = True) -> Tuple[int, ...]:
         """Converts a 1D linear integer index into a multi-dimensional scenario index tuple."""
@@ -1617,6 +1876,43 @@ def s(*args: Any, **kwargs: Any) -> UncertainNumber:
                 except Exception:
                     parsed.append(t)
             return UncertainNumber(parsed)
-        return UncertainNumber({val})
-
     return UncertainNumber(list(args))
+
+
+def weak_relation(
+    first: Any,
+    second: Any,
+    relation: Union[str, Callable[[Any, Any], bool]] = "<=",
+    weights_first: Any = None,
+    weights_second: Any = None,
+) -> WeakRelation:
+    """
+    Tính quan hệ hai ngôi yếu mu(ARB) giữa hai số bất định ở cấp module.
+    Định nghĩa 2.8 & 2.17.
+    """
+    a_unc = _to_unc(first)
+    b_unc = _to_unc(second)
+    return a_unc.weak_relation(
+        b_unc,
+        relation=relation,
+        weights_self=weights_first,
+        weights_other=weights_second,
+    )
+
+
+def mu(
+    first: Any,
+    second: Any,
+    relation: Union[str, Callable[[Any, Any], bool]] = "<=",
+    weights_first: Any = None,
+    weights_second: Any = None,
+) -> WeakRelation:
+    """Alias cho weak_relation ở cấp module."""
+    return weak_relation(
+        first,
+        second,
+        relation=relation,
+        weights_first=weights_first,
+        weights_second=weights_second,
+    )
+

@@ -1,4 +1,4 @@
-from .UncertainNumber import UncertainNumber, pw, epw, m, em, s
+from .UncertainNumber import UncertainNumber, WeakRelation, weak_relation, mu, pw, epw, m, em, s
 from .Arithmetic import Arithmetic
 from .PointwiseArithmetic import PointwiseArithmetic
 from .EPointwiseArithmetic import EPointwiseArithmetic
@@ -9,6 +9,9 @@ __version__ = "0.1.0"
 
 __all__ = [
     "UncertainNumber",
+    "WeakRelation",
+    "weak_relation",
+    "mu",
     "Arithmetic",
     "PointwiseArithmetic",
     "EPointwiseArithmetic",
