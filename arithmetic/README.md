@@ -47,4 +47,19 @@ print(f"(0.5 * {{2, 3, 4}})_em = {res_em_half}")
 # 5. Sử dụng hàm pw, epw, m, em với đầu vào lambda:
 f_pw = pw(lambda x: x**2 + 5*x + 6, X)
 print(f"pw(lambda x: x^2 + 5x + 6, X) = {f_pw}")
+
+# 6. Quan hệ hai ngôi yếu và lấy giá trị chân lý với hàm mu:
+from arithmetic import mu
+
+A = UncertainNumber({1, 2})
+B = UncertainNumber({1, 2})
+
+# Gọi qua phương thức của đối tượng:
+val = A.mu("<=", B)        # hoặc A.mu(B, "<=")
+print(f"A.mu('<=', B) = {val}")  # 0.75
+
+# Hoặc gọi qua hàm cấp module:
+val_mod = mu(A, B, "<=")
+print(f"mu(A, B, '<=') = {val_mod}")  # 0.75
 ```
+

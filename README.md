@@ -77,6 +77,20 @@ print(f"(0.5 * {{1, 5, 6, 7, 25, 30, 35, 36, 42, 49}})_em = {res_em_add_none} (V
 
 res_em_pow = Arithmetic.pow(X_custom, 0.5, space="em")
 print(f"({{1, 5, 6, 7, 25, 30, 35, 36, 42, 49}}^0.5)_em = {res_em_pow}")
+
+# 7. Quan hệ hai ngôi yếu và hàm chân lý mu (Weak Binary Relation)
+from arithmetic import mu
+
+A_rel = UncertainNumber({1, 2})
+B_rel = UncertainNumber({1, 2})
+
+# Gọi qua phương thức của đối tượng:
+val_mu = A_rel.mu("<=", B_rel)        # hoặc A_rel.mu(B_rel, "<=")
+print(f"A_rel.mu('<=', B_rel) = {val_mu}")  # 0.75
+
+# Hoặc gọi qua hàm cấp module:
+val_mu_mod = mu(A_rel, B_rel, "<=")
+print(f"mu(A_rel, B_rel, '<=') = {val_mu_mod}")  # 0.75
 ```
 
 <p>
