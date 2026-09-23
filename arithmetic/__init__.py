@@ -1,4 +1,5 @@
-from .UncertainNumber import UncertainNumber, WeakRelation, weak_relation, mu, pw, epw, m, em, s
+from .UncertainNumber import UncertainNumber, WeakRelation, weak_relation, mu, pw, epw, m, em, s, c
+
 from .Arithmetic import Arithmetic, lift_m
 from .PointwiseArithmetic import PointwiseArithmetic
 from .EPointwiseArithmetic import EPointwiseArithmetic

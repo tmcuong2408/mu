@@ -1883,6 +1883,42 @@ def em(fn: Callable, *args: Any):
     return _apply(*args) if args else _apply
 
 
+def c(fns: list) -> Callable:
+    """
+    Hàm hợp (function composition) — nhận danh sách callable có thứ tự.
+
+    Cú pháp: c([f, g, h]) = f ∘ g ∘ h
+    Tương đương: lambda *args: f(g(h(*args)))
+    Thứ tự áp dụng từ phải sang trái (như toán học):
+        phần tử cuối list được áp dụng trước, phần tử đầu áp dụng sau cùng.
+
+    Danh sách dài tùy ý, tối thiểu 1 phần tử.
+
+    Ví dụ:
+        f_1 = m(lambda x: x + x)
+        f_2 = pw(lambda x: x + x)
+        h = c([f_2, f_1])   # h(x) = f_2(f_1(x))
+        h(a)
+    """
+    if not fns:
+        raise ValueError("c() nhận ít nhất một callable trong danh sách.")
+
+    for i, fn in enumerate(fns):
+        if not callable(fn):
+            raise TypeError(f"c(): phần tử tại vị trí {i} không phải callable: {fn!r}")
+
+    def _composed(*args, **kwargs):
+        # Áp dụng từ phải sang trái
+        result = fns[-1](*args, **kwargs)
+        for fn in reversed(fns[:-1]):
+            result = fn(result)
+        return result
+
+    names = ", ".join(getattr(fn, "__name__", repr(fn)) for fn in fns)
+    _composed.__name__ = f"c([{names}])"
+    return _composed
+
+
 def s(*args: Any, **kwargs: Any) -> UncertainNumber:
     """
     Khởi tạo nhanh số bất định (UncertainNumber).
