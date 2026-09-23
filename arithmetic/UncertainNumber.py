@@ -1470,19 +1470,19 @@ class UncertainNumber:
     # ==================== FUNCTIONAL SPACE OPERATORS ====================
 
     @staticmethod
-    def pw(fn: Callable, *args: Any) -> "UncertainNumber":
+    def pw(fn: Callable, *args: Any):
         return pw(fn, *args)
 
     @staticmethod
-    def epw(fn: Callable, *args: Any) -> "UncertainNumber":
+    def epw(fn: Callable, *args: Any):
         return epw(fn, *args)
 
     @staticmethod
-    def m(fn: Callable, *args: Any) -> "UncertainNumber":
+    def m(fn: Callable, *args: Any):
         return m(fn, *args)
 
     @staticmethod
-    def em(fn: Callable, *args: Any) -> "UncertainNumber":
+    def em(fn: Callable, *args: Any):
         return em(fn, *args)
 
     @staticmethod
@@ -1625,209 +1625,262 @@ def _make_pw_bin(op_sym: str, left: Any, right: Any, op_fn: Callable) -> _PwExpr
         return _PwExpr(lambda idx: val, lambda v: str(val))
 
 
-def pw(fn: Callable, *args: Any) -> UncertainNumber:
+def pw(fn: Callable, *args: Any):
     """
     Point-wise Space (o)_1 functional operator.
     Definition 3.2: (f)_1(A) := {f(x) : x in A}_u
+
+    Hỗ trợ hai kiểu gọi:
+        pw(fn)        -> Callable[..., UncertainNumber]  (curried)
+        pw(fn, A, B)  -> UncertainNumber                 (shorthand)
+
+    Example:
+        f = pw(lambda x: x**2 + 5*x + 6)
+        result = f(UncertainNumber({1, 2, 3, 4}))           # curried
+        result = pw(lambda x: x**2 + 5*x + 6, X)           # shorthand
     """
-    if not args:
-        return UncertainNumber({fn()})
+    def _apply(*args: Any) -> UncertainNumber:
+        if not args:
+            return UncertainNumber({fn()})
 
-    unc_args = [_to_unc(a) for a in args]
-    d0 = unc_args[0].d
+        unc_args = [_to_unc(a) for a in args]
+        d0 = unc_args[0].d
 
-    for u in unc_args:
-        if u.d != d0:
-            raise ValueError(
-                f"Point-wise Space (o)_1 requires identical index domains. Got {u.d} and {d0}."
-            )
+        for u in unc_args:
+            if u.d != d0:
+                raise ValueError(
+                    f"Point-wise Space (o)_1 requires identical index domains. Got {u.d} and {d0}."
+                )
 
-    try:
-        pw_args = [
-            _PwExpr(
-                eval_fn=(lambda idx, unc=u: unc.evaluate_at_index(idx)),
-                formula_fn=(lambda var, unc=u: unc.get_formula([var])),
-                unc=u,
-            )
-            for u in unc_args
-        ]
-        res_expr = fn(*pw_args)
-        if isinstance(res_expr, _PwExpr):
-            return UncertainNumber(
-                generative_fn=lambda idx: res_expr.eval(idx),
-                index_domain=d0,
-                ast_node={
-                    "type": "custom_fn",
-                    "space_type": "pointwise",
-                    "formula_template": lambda v: res_expr.get_formula(v),
-                },
-            )
-        elif isinstance(res_expr, UncertainNumber):
-            return res_expr
-        elif isinstance(res_expr, (int, float, complex, Fraction)):
-            return UncertainNumber({res_expr})
-    except Exception:
-        pass
+        try:
+            pw_args = [
+                _PwExpr(
+                    eval_fn=(lambda idx, unc=u: unc.evaluate_at_index(idx)),
+                    formula_fn=(lambda var, unc=u: unc.get_formula([var])),
+                    unc=u,
+                )
+                for u in unc_args
+            ]
+            res_expr = fn(*pw_args)
+            if isinstance(res_expr, _PwExpr):
+                return UncertainNumber(
+                    generative_fn=lambda idx: res_expr.eval(idx),
+                    index_domain=d0,
+                    ast_node={
+                        "type": "custom_fn",
+                        "space_type": "pointwise",
+                        "formula_template": lambda v: res_expr.get_formula(v),
+                    },
+                )
+            elif isinstance(res_expr, UncertainNumber):
+                return res_expr
+            elif isinstance(res_expr, (int, float, complex, Fraction)):
+                return UncertainNumber({res_expr})
+        except Exception:
+            pass
 
-    generative_fn = lambda idx: fn(*(u.evaluate_at_index(idx) for u in unc_args))
-    return UncertainNumber(
-        generative_fn=generative_fn,
-        index_domain=d0,
-        ast_node={"type": "custom_fn", "space_type": "pointwise"},
-    )
+        generative_fn = lambda idx: fn(*(u.evaluate_at_index(idx) for u in unc_args))
+        return UncertainNumber(
+            generative_fn=generative_fn,
+            index_domain=d0,
+            ast_node={"type": "custom_fn", "space_type": "pointwise"},
+        )
+
+    _apply.__name__ = f"pw({getattr(fn, '__name__', repr(fn))})"
+    return _apply(*args) if args else _apply
 
 
-def epw(fn: Callable, *args: Any) -> UncertainNumber:
+def epw(fn: Callable, *args: Any):
     """
     Extended Point-wise Space (o)_1' functional operator.
     Supports broadcasting between scalars and multi-element UncertainNumbers.
+
+    Hỗ trợ hai kiểu gọi:
+        epw(fn)           -> Callable[..., UncertainNumber]  (curried)
+        epw(fn, X, 10)    -> UncertainNumber                 (shorthand)
+
+    Example:
+        f = epw(lambda x, c: x * c + 1)
+        result = f(UncertainNumber({1, 2, 3, 4}), 10)       # curried
+        result = epw(lambda x, c: x * c + 1, X, 10)        # shorthand
     """
-    if not args:
-        return UncertainNumber({fn()})
+    def _apply(*args: Any) -> UncertainNumber:
+        if not args:
+            return UncertainNumber({fn()})
 
-    unc_args = [_to_unc(a) for a in args]
-    non_scalar_domains = [u.d for u in unc_args if u.d != (1,)]
+        unc_args = [_to_unc(a) for a in args]
+        non_scalar_domains = [u.d for u in unc_args if u.d != (1,)]
 
-    if not non_scalar_domains:
-        target_d = (1,)
-    else:
-        target_d = non_scalar_domains[0]
-        for d in non_scalar_domains:
-            if d != target_d:
-                raise ValueError(
-                    f"Incompatible multi-element domains for (o)_1': {d} and {target_d}."
+        if not non_scalar_domains:
+            target_d = (1,)
+        else:
+            target_d = non_scalar_domains[0]
+            for d in non_scalar_domains:
+                if d != target_d:
+                    raise ValueError(
+                        f"Incompatible multi-element domains for (o)_1': {d} and {target_d}."
+                    )
+
+        try:
+            pw_args = [
+                _PwExpr(
+                    eval_fn=(lambda idx, unc=u: unc.evaluate_at_index((1,) if unc.d == (1,) else idx)),
+                    formula_fn=(lambda var, unc=u: unc.get_formula([var])),
+                    unc=u,
                 )
+                for u in unc_args
+            ]
+            res_expr = fn(*pw_args)
+            if isinstance(res_expr, _PwExpr):
+                return UncertainNumber(
+                    generative_fn=lambda idx: res_expr.eval(idx),
+                    index_domain=target_d,
+                    ast_node={
+                        "type": "custom_fn",
+                        "space_type": "pointwise",
+                        "formula_template": lambda v: res_expr.get_formula(v),
+                    },
+                )
+            elif isinstance(res_expr, UncertainNumber):
+                return res_expr
+            elif isinstance(res_expr, (int, float, complex, Fraction)):
+                return UncertainNumber({res_expr})
+        except Exception:
+            pass
 
-    try:
-        pw_args = [
-            _PwExpr(
-                eval_fn=(lambda idx, unc=u: unc.evaluate_at_index((1,) if unc.d == (1,) else idx)),
-                formula_fn=(lambda var, unc=u: unc.get_formula([var])),
-                unc=u,
-            )
-            for u in unc_args
-        ]
-        res_expr = fn(*pw_args)
-        if isinstance(res_expr, _PwExpr):
-            return UncertainNumber(
-                generative_fn=lambda idx: res_expr.eval(idx),
-                index_domain=target_d,
-                ast_node={
-                    "type": "custom_fn",
-                    "space_type": "pointwise",
-                    "formula_template": lambda v: res_expr.get_formula(v),
-                },
-            )
-        elif isinstance(res_expr, UncertainNumber):
-            return res_expr
-        elif isinstance(res_expr, (int, float, complex, Fraction)):
-            return UncertainNumber({res_expr})
-    except Exception:
-        pass
+        generative_fn = lambda idx: fn(
+            *(u.evaluate_at_index((1,) if u.d == (1,) else idx) for u in unc_args)
+        )
+        return UncertainNumber(
+            generative_fn=generative_fn,
+            index_domain=target_d,
+            ast_node={"type": "custom_fn", "space_type": "pointwise"},
+        )
 
-    generative_fn = lambda idx: fn(
-        *(u.evaluate_at_index((1,) if u.d == (1,) else idx) for u in unc_args)
-    )
-    return UncertainNumber(
-        generative_fn=generative_fn,
-        index_domain=target_d,
-        ast_node={"type": "custom_fn", "space_type": "pointwise"},
-    )
+    _apply.__name__ = f"epw({getattr(fn, '__name__', repr(fn))})"
+    return _apply(*args) if args else _apply
 
 
-def m(fn: Callable, *args: Any) -> UncertainNumber:
+def m(fn: Callable, *args: Any):
     """
     Minkowski Space (o)_m functional operator.
 
     Định nghĩa tổng quát: với hàm vô hướng f(a, b, ...) trên số thực/phức,
     lift lên không gian Minkowski:
-        m(f, A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }
+        m(f)(A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }
     Miền chỉ số mới là tích Descartes d_A × d_B × ...
+
+    Hỗ trợ hai kiểu gọi:
+        m(fn)           -> Callable[..., UncertainNumber]  (curried)
+        m(fn, A, B)     -> UncertainNumber                 (shorthand)
+
+    Example:
+        add_m = m(lambda a, b: a + b)
+        result = add_m(UncertainNumber({1, 3}), UncertainNumber({10, 20}))  # curried
+        result = m(lambda a, b: a + b, A, B)                                # shorthand
     """
-    if not args:
-        return UncertainNumber({fn()})
+    def _apply(*args: Any) -> UncertainNumber:
+        if not args:
+            return UncertainNumber({fn()})
 
-    unc_args = [_to_unc(a) for a in args]
+        unc_args = [_to_unc(a) for a in args]
 
-    try:
-        res = fn(*unc_args)
-        if isinstance(res, UncertainNumber) and not any(res is u for u in unc_args):
-            return res
-        elif isinstance(res, (int, float, complex, Fraction)) and not isinstance(res, bool):
-            return UncertainNumber({res})
-    except Exception:
-        pass
+        try:
+            res = fn(*unc_args)
+            if isinstance(res, UncertainNumber) and not any(res is u for u in unc_args):
+                return res
+            elif isinstance(res, (int, float, complex, Fraction)) and not isinstance(res, bool):
+                return UncertainNumber({res})
+        except Exception:
+            pass
 
-    new_d = sum((u.d for u in unc_args), ())
+        new_d = sum((u.d for u in unc_args), ())
 
-    def generative_fn(idx_tuple: Any) -> Numeric:
-        if not isinstance(idx_tuple, tuple):
-            idx_tuple = (idx_tuple,)
-        arg_vals = []
-        curr = 0
-        for u in unc_args:
-            dim = len(u.d)
-            sub_idx = idx_tuple[curr: curr + dim]
-            curr += dim
-            arg_vals.append(u.evaluate_at_index(sub_idx))
-        return fn(*arg_vals)
+        def generative_fn(idx_tuple: Any) -> Numeric:
+            if not isinstance(idx_tuple, tuple):
+                idx_tuple = (idx_tuple,)
+            arg_vals = []
+            curr = 0
+            for u in unc_args:
+                dim = len(u.d)
+                sub_idx = idx_tuple[curr: curr + dim]
+                curr += dim
+                arg_vals.append(u.evaluate_at_index(sub_idx))
+            return fn(*arg_vals)
 
-    return UncertainNumber(
-        generative_fn=generative_fn,
-        index_domain=new_d,
-        ast_node={"type": "custom_fn", "space_type": "minkowski"},
-    )
+        return UncertainNumber(
+            generative_fn=generative_fn,
+            index_domain=new_d,
+            ast_node={"type": "custom_fn", "space_type": "minkowski"},
+        )
+
+    _apply.__name__ = f"m({getattr(fn, '__name__', repr(fn))})"
+    return _apply(*args) if args else _apply
 
 
-def em(fn: Callable, *args: Any) -> UncertainNumber:
+def em(fn: Callable, *args: Any):
     """
     Extended Minkowski Space (o)_m' functional operator.
+    Supports inverse operations (e.g. scalar deconvolution, root extraction).
+
+    Hỗ trợ hai kiểu gọi:
+        em(fn)      -> Callable[..., UncertainNumber]  (curried)
+        em(fn, X)   -> UncertainNumber                 (shorthand)
+
+    Example:
+        half = em(lambda x: 0.5 * x)
+        result = half(UncertainNumber({2, 3, 4}))           # curried
+        result = em(lambda x: 0.5 * x, UncertainNumber({2, 3, 4}))  # shorthand
     """
-    if not args:
-        return UncertainNumber({fn()})
+    def _apply(*args: Any) -> UncertainNumber:
+        if not args:
+            return UncertainNumber({fn()})
 
-    unc_args = [_to_unc(a) for a in args]
+        unc_args = [_to_unc(a) for a in args]
 
-    if len(unc_args) == 2:
-        from .EMinkowskiArithmetic import EMinkowskiArithmetic
-        if unc_args[0].d == (1,) or unc_args[1].d == (1,):
-            return EMinkowskiArithmetic.em(unc_args[0], unc_args[1], fn)
+        if len(unc_args) == 2:
+            from .EMinkowskiArithmetic import EMinkowskiArithmetic
+            if unc_args[0].d == (1,) or unc_args[1].d == (1,):
+                return EMinkowskiArithmetic.em(unc_args[0], unc_args[1], fn)
 
-    if len(unc_args) == 1:
-        from .EMinkowskiArithmetic import EMinkowskiArithmetic
-        unc_target = unc_args[0]
-        probe = 4
+        if len(unc_args) == 1:
+            from .EMinkowskiArithmetic import EMinkowskiArithmetic
+            unc_target = unc_args[0]
+            probe = 4
 
-        try:
-            result_mul = fn(probe)
-            if isinstance(result_mul, (int, float, Fraction)) and probe != 0:
-                scalar_val = Fraction(result_mul, probe) if isinstance(result_mul, int) else result_mul / probe
-                probe2 = 9
-                result_mul2 = fn(probe2)
-                if isinstance(result_mul2, (int, float, Fraction)):
-                    sv2 = Fraction(result_mul2, probe2) if isinstance(result_mul2, int) else result_mul2 / probe2
-                    if _approx_eq(sv2, scalar_val):
-                        scalar_unc = UncertainNumber({scalar_val})
-                        return EMinkowskiArithmetic.em(scalar_unc, unc_target, lambda x, y: x * y)
-        except Exception:
-            pass
+            try:
+                result_mul = fn(probe)
+                if isinstance(result_mul, (int, float, Fraction)) and probe != 0:
+                    scalar_val = Fraction(result_mul, probe) if isinstance(result_mul, int) else result_mul / probe
+                    probe2 = 9
+                    result_mul2 = fn(probe2)
+                    if isinstance(result_mul2, (int, float, Fraction)):
+                        sv2 = Fraction(result_mul2, probe2) if isinstance(result_mul2, int) else result_mul2 / probe2
+                        if _approx_eq(sv2, scalar_val):
+                            scalar_unc = UncertainNumber({scalar_val})
+                            return EMinkowskiArithmetic.em(scalar_unc, unc_target, lambda x, y: x * y)
+            except Exception:
+                pass
 
-        try:
-            result_pow = fn(probe)
-            if isinstance(result_pow, (int, float)) and probe > 0 and result_pow > 0:
-                import math as _math
-                p_val = _math.log(result_pow) / _math.log(probe)
-                probe2 = 9
-                result_pow2 = fn(probe2)
-                if isinstance(result_pow2, (int, float)) and result_pow2 > 0:
-                    p_val2 = _math.log(result_pow2) / _math.log(probe2)
-                    if abs(p_val2 - p_val) < 1e-9:
-                        power_unc = UncertainNumber({p_val})
-                        return EMinkowskiArithmetic.em(unc_target, power_unc, lambda x, y: x ** y)
-        except Exception:
-            pass
+            try:
+                result_pow = fn(probe)
+                if isinstance(result_pow, (int, float)) and probe > 0 and result_pow > 0:
+                    import math as _math
+                    p_val = _math.log(result_pow) / _math.log(probe)
+                    probe2 = 9
+                    result_pow2 = fn(probe2)
+                    if isinstance(result_pow2, (int, float)) and result_pow2 > 0:
+                        p_val2 = _math.log(result_pow2) / _math.log(probe2)
+                        if abs(p_val2 - p_val) < 1e-9:
+                            power_unc = UncertainNumber({p_val})
+                            return EMinkowskiArithmetic.em(unc_target, power_unc, lambda x, y: x ** y)
+            except Exception:
+                pass
 
-    return m(fn, *unc_args)
+        return m(fn)(*unc_args)
+
+    _apply.__name__ = f"em({getattr(fn, '__name__', repr(fn))})"
+    return _apply(*args) if args else _apply
 
 
 def s(*args: Any, **kwargs: Any) -> UncertainNumber:

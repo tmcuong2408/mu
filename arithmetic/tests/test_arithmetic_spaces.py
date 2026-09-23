@@ -34,14 +34,29 @@ class TestPointwiseArithmetic:
     def test_pw_lambda_functional(self):
         X = UncertainNumber({1, 2, 3, 4})
         # f(x) = x^2 + 5x + 6: for x=1->12, x=2->20, x=3->30, x=4->42
-        f_pw = pw(lambda x: x**2 + 5*x + 6, X)
-        assert f_pw.to_set() == {12, 20, 30, 42}
-        assert f_pw.d == (4,)
+        f_pw = pw(lambda x: x**2 + 5*x + 6)
+        result = f_pw(X)
+        assert result.to_set() == {12, 20, 30, 42}
+        assert result.d == (4,)
 
     def test_pw_identity_cancellation(self):
         X = UncertainNumber({10, 20, 30})
-        zero_pw = pw(lambda x: x - x, X)
+        zero_pw = pw(lambda x: x - x)(X)
         assert zero_pw.to_set() == {0}
+
+    def test_pw_reusable_operator(self):
+        # pw(fn) returns a callable that can be reused on different inputs
+        square = pw(lambda x: x**2)
+        X = UncertainNumber({1, 2, 3})
+        Y = UncertainNumber({4, 5, 6})
+        assert square(X).to_set() == {1, 4, 9}
+        assert square(Y).to_set() == {16, 25, 36}
+
+    def test_pw_shorthand_form(self):
+        # pw(fn, *args) shorthand is equivalent to pw(fn)(*args)
+        X = UncertainNumber({1, 2, 3, 4})
+        fn = lambda x: x**2 + 5*x + 6
+        assert pw(fn, X).to_set() == pw(fn)(X).to_set()
 
 
 class TestExtendedPointwiseArithmetic:
@@ -56,8 +71,22 @@ class TestExtendedPointwiseArithmetic:
 
     def test_epw_lambda_functional(self):
         X = UncertainNumber({1, 2, 3, 4})
-        res = epw(lambda x, c: x * c + 1, X, 10)
+        f = epw(lambda x, c: x * c + 1)
+        res = f(X, 10)
         assert res.to_set() == {11, 21, 31, 41}
+
+    def test_epw_reusable_operator(self):
+        # epw(fn) returns a callable reusable across different inputs
+        scale_plus1 = epw(lambda x, c: x * c + 1)
+        X = UncertainNumber({1, 2, 3})
+        assert scale_plus1(X, 2).to_set() == {3, 5, 7}
+        assert scale_plus1(X, 0).to_set() == {1}
+
+    def test_epw_shorthand_form(self):
+        # epw(fn, *args) shorthand is equivalent to epw(fn)(*args)
+        X = UncertainNumber({1, 2, 3, 4})
+        fn = lambda x, c: x * c + 1
+        assert epw(fn, X, 10).to_set() == epw(fn)(X, 10).to_set()
 
 
 class TestMinkowskiArithmetic:
@@ -105,24 +134,44 @@ class TestMinkowskiArithmetic:
     def test_m_lambda_functional1(self):
         A = UncertainNumber({1, 3})
         B = UncertainNumber({10, 20})
-        res_m_fn = m(lambda a, b: a + b, A, B)
+        add_m = m(lambda a, b: a + b)
+        res_m_fn = add_m(A, B)
         assert res_m_fn.to_set() == {11, 13, 21, 23}
 
     def test_m_lambda_functional2(self):
         A = UncertainNumber({1, 3})
-        res_m_fn = m(lambda A: A + A, A)
+        double_m = m(lambda A: A + A)
+        res_m_fn = double_m(A)
         assert res_m_fn.to_set() == {2, 4, 6}
 
     def test_m_lambda_functional3(self):
         A = UncertainNumber({1, 2, 3})
-        res_m_fn = m(lambda A: A + A*A, A)
+        poly_m = m(lambda A: A + A*A)
+        res_m_fn = poly_m(A)
         assert res_m_fn.to_set() == {10, 11, 12, 2, 3, 4, 5, 6, 7, 8, 9}
 
     def test_m_lambda_functional4(self):
         A = UncertainNumber([13, 5])
         B = UncertainNumber([1, 3])
-        res_m_fn = m(lambda x,y: x*x + y*y, A, B)
+        sumsq = m(lambda x, y: x*x + y*y)
+        res_m_fn = sumsq(A, B)
         assert res_m_fn.to_set() == {170, 172, 178, 26, 28, 34, 66, 68, 74}
+
+    def test_m_reusable_operator(self):
+        # m(fn) returns a callable reusable on different argument sets
+        mul_m = m(lambda a, b: a * b)
+        A = UncertainNumber({2, 3})
+        B = UncertainNumber({4, 5})
+        C = UncertainNumber({10, 20})
+        assert mul_m(A, B).to_set() == {8, 10, 12, 15}
+        assert mul_m(A, C).to_set() == {20, 30, 40, 60}
+
+    def test_m_shorthand_form(self):
+        # m(fn, *args) shorthand is equivalent to m(fn)(*args)
+        A = UncertainNumber({1, 3})
+        B = UncertainNumber({10, 20})
+        fn = lambda a, b: a + b
+        assert m(fn, A, B).to_set() == m(fn)(A, B).to_set()
    
 class TestExtendedMinkowskiArithmetic:
     def test_em_fractional_scalar_mul_valid(self):
