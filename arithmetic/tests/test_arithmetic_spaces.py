@@ -118,7 +118,12 @@ class TestMinkowskiArithmetic:
         res_m_fn = m(lambda A: A + A*A, A)
         assert res_m_fn.to_set() == {10, 11, 12, 2, 3, 4, 5, 6, 7, 8, 9}
 
-
+    def test_m_lambda_functional4(self):
+        A = UncertainNumber([13, 5])
+        B = UncertainNumber([1, 3])
+        res_m_fn = m(lambda x,y: x*x + y*y, A, B)
+        assert res_m_fn.to_set() == {170, 172, 178, 26, 28, 34, 66, 68, 74}
+   
 class TestExtendedMinkowskiArithmetic:
     def test_em_fractional_scalar_mul_valid(self):
         # 0.5 * {2, 3, 4} solves for X such that X + X = {2, 3, 4}
