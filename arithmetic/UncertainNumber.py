@@ -1748,6 +1748,16 @@ def m(fn: Callable, *args: Any) -> UncertainNumber:
         return UncertainNumber({fn()})
 
     unc_args = [_to_unc(a) for a in args]
+
+    try:
+        res = fn(*unc_args)
+        if isinstance(res, UncertainNumber) and not any(res is u for u in unc_args):
+            return res
+        elif isinstance(res, (int, float, complex, Fraction)) and not isinstance(res, bool):
+            return UncertainNumber({res})
+    except Exception:
+        pass
+
     new_d = sum((u.d for u in unc_args), ())
 
     def generative_fn(idx_tuple: Any) -> Numeric:

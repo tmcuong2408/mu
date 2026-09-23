@@ -102,11 +102,21 @@ class TestMinkowskiArithmetic:
         neg_u = UncertainNumber({-5, 3})
         assert abs(neg_u).to_set() == {3, 5}
 
-    def test_m_lambda_functional(self):
+    def test_m_lambda_functional1(self):
         A = UncertainNumber({1, 3})
         B = UncertainNumber({10, 20})
         res_m_fn = m(lambda a, b: a + b, A, B)
         assert res_m_fn.to_set() == {11, 13, 21, 23}
+
+    def test_m_lambda_functional2(self):
+        A = UncertainNumber({1, 3})
+        res_m_fn = m(lambda A: A + A, A)
+        assert res_m_fn.to_set() == {2, 4, 6}
+
+    def test_m_lambda_functional3(self):
+        A = UncertainNumber({1, 2, 3})
+        res_m_fn = m(lambda A: A + A*A, A)
+        assert res_m_fn.to_set() == {10, 11, 12, 2, 3, 4, 5, 6, 7, 8, 9}
 
 
 class TestExtendedMinkowskiArithmetic:
