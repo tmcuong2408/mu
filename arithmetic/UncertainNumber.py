@@ -5,19 +5,19 @@ from fractions import Fraction
 from decimal import Decimal, getcontext, ROUND_HALF_EVEN, InvalidOperation
 from typing import Callable, Union, List, Tuple, Set, Any
 
-# Độ chính xác cao cho Decimal (512 chữ số thập phân)
+# High precision for Decimal (512 decimal places)
 getcontext().prec = 512
 
 # Type alias for numeric types (supporting both Real and Complex numbers)
 Numeric = Union[int, float, complex, Fraction, Decimal]
 
 
-# ==================== HELPER: số học chính xác ====================
+# ==================== HELPER: Exact Arithmetic ====================
 
 def _to_exact(v: Any) -> Any:
     """
-    Chuyển float sang Fraction (biểu diễn chính xác) nếu có thể.
-    int, Fraction, complex giữ nguyên.
+    Converts float to Fraction (exact representation) if possible.
+    int, Fraction, and complex remain unchanged.
     """
     if isinstance(v, bool):
         return v
@@ -28,7 +28,7 @@ def _to_exact(v: Any) -> Any:
     if isinstance(v, float):
         if math.isfinite(v):
             return Fraction(v).limit_denominator(10**15)
-        return v  # inf / nan giữ nguyên float
+        return v  # inf / nan keep as float
     if isinstance(v, Decimal):
         try:
             return Fraction(v)
@@ -39,13 +39,13 @@ def _to_exact(v: Any) -> Any:
 
 def _to_display(v: Any) -> Any:
     """
-    Chuyển Fraction thành int nếu mẫu = 1, hoặc float nếu mẫu đơn giản.
-    Dùng cho to_set() để giữ kiểu dữ liệu gọn gàng.
+    Converts Fraction to int if denominator == 1, or float if simple denominator.
+    Used for to_set() to keep data types clean.
     """
     if isinstance(v, Fraction):
         if v.denominator == 1:
             return v.numerator
-        # Nếu denominator nhỏ, trả về Fraction (chính xác)
+        # If denominator is small, return Fraction (exact)
         return v
     if isinstance(v, float):
         if math.isfinite(v) and v == int(v):
@@ -61,7 +61,7 @@ def _to_display(v: Any) -> Any:
 
 
 def _safe_round_val(val: Any) -> Any:
-    """Làm sạch giá trị sau tính toán, ưu tiên giữ int hoặc Fraction."""
+    """Cleans value after computation, prioritizing int or Fraction."""
     if isinstance(val, bool):
         return val
     if isinstance(val, int):
@@ -71,7 +71,7 @@ def _safe_round_val(val: Any) -> Any:
     if isinstance(val, float):
         if not math.isfinite(val):
             return val
-        # Chuyển sang Fraction rồi quyết định
+        # Convert to Fraction then decide
         frac = Fraction(val).limit_denominator(10**12)
         if abs(float(frac) - val) < 1e-10 * (1 + abs(val)):
             return _to_display(frac)
@@ -90,10 +90,10 @@ def _safe_round_val(val: Any) -> Any:
 def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Callable[[Numeric], Numeric]:
     """
     Constructs a generative function f(x) via Lagrange Polynomial Interpolation.
-    Sử dụng Fraction để đảm bảo độ chính xác tuyệt đối với số nguyên lớn.
+    Uses Fraction to ensure exact precision with large integers.
     """
     n = len(x_nodes)
-    # Precompute denominators dùng Fraction
+    # Precompute denominators using Fraction
     x_frac = [Fraction(xi) for xi in x_nodes]
     y_frac = [_to_exact(yi) for yi in y_values]
 
@@ -128,7 +128,7 @@ def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Calla
 def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str = "x") -> str:
     """
     Returns a human-readable symbolic string for the Lagrange interpolating polynomial.
-    Dùng Fraction cho hệ số chính xác.
+    Uses Fraction for exact coefficients.
     """
     n = len(x_nodes)
     x_frac = [Fraction(xi) for xi in x_nodes]
@@ -162,7 +162,7 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
     def _fmt(c: Fraction):
         if c.denominator == 1:
             return c.numerator
-        # Trả về Fraction nếu đơn giản, float nếu không
+        # Return Fraction if simple, otherwise float
         if abs(c.denominator) <= 10000:
             return c
         return float(c)
@@ -217,10 +217,10 @@ def lagrange_formula_str(x_nodes: List[int], y_values: List[Numeric], var: str =
     return result
 
 
-# ==================== APPROX EQ (chịu được số nguyên siêu lớn) ====================
+# ==================== APPROX EQ (Large Integer Resilient) ====================
 
 def _approx_eq(a: Any, b: Any, rel_tol: float = 1e-7, abs_tol: float = 1e-9) -> bool:
-    """Checks approximate equality. An toàn với số nguyên siêu lớn và Fraction."""
+    """Checks approximate equality. Safe with arbitrarily large integers and Fractions."""
     if a is None or b is None:
         return False
     # Exact equality (handles int, Fraction, etc.)
@@ -336,7 +336,7 @@ def _get_leaf_linear_params(unc: "UncertainNumber") -> Union[Tuple[Numeric, Nume
             e0 = _to_exact(elems[0])
             e_last = _to_exact(elems[-1])
             step = (e_last - e0) / (n - 1) if isinstance(e0, Fraction) else (e_last - e0) / (n - 1)
-            # Dùng Fraction để so sánh chính xác
+            # Use Fraction for exact comparison
             try:
                 step_f = Fraction(e_last - e0, n - 1) if isinstance(e0, (int, Fraction)) else step
                 is_arith = all(
@@ -432,7 +432,7 @@ def _solve_ast_membership(
 ) -> bool:
     """
     Core AST Equation Solver engine.
-    An toàn với số nguyên siêu lớn và Fraction.
+    Safe with arbitrarily large integers and Fractions.
     """
     if depth > 1000:
         return False
@@ -463,7 +463,7 @@ def _solve_ast_membership(
         try:
             t_val = target
             lo, hi = b[0], b[1]
-            # So sánh an toàn
+            # Safe comparison
             if t_val < lo - abs_tol - rel_tol * abs(lo):
                 return False
             if t_val > hi + abs_tol + rel_tol * abs(hi):
@@ -636,13 +636,13 @@ def _solve_ast_membership(
                             return True
                     else:
                         try:
-                            # Dùng Fraction nếu vr là int/Fraction
+                            # Use Fraction if vr is int/Fraction
                             if isinstance(vr, (int, Fraction)) and isinstance(target, int) and target > 0:
-                                # req_l = target^(1/vr) — kiểm tra chính xác
+                                # req_l = target^(1/vr) — check exact
                                 vr_f = Fraction(vr)
                                 if vr_f.denominator == 1 and vr_f.numerator > 0:
                                     p = vr_f.numerator
-                                    # Kiểm tra xem target có phải p-th power không
+                                    # Check whether target is a p-th power
                                     guess = round(target ** (1.0 / p))
                                     for candidate in [guess - 1, guess, guess + 1]:
                                         if candidate > 0 and candidate ** p == target:
@@ -702,13 +702,13 @@ def _solve_ast_membership(
     return False
 
 
-# ==================== WEAK BINARY RELATION (QUAN HỆ HAI NGÔI YẾU) ====================
+# ==================== WEAK BINARY RELATION ====================
 
 class WeakRelation(float):
     """
-    Biểu diễn kết quả của quan hệ hai ngôi yếu ARB với giá trị chân lý mu(ARB).
-    Kế thừa từ float để hoàn toàn tương thích với các phép tính số học và so sánh số thực.
-    Định nghĩa 2.8 & 2.17 trong tài liệu 'Logic Mở Rộng Và Toán Học Bất Định'.
+    Represents the evaluation of a weak binary relation ARB with truth value mu(ARB).
+    Inherits from float for full compatibility with arithmetic operations and real comparisons.
+    Definition 2.8 & 2.17 in 'Extended Logic and Mathematics of Uncertainty'.
     """
 
     def __new__(
@@ -729,7 +729,7 @@ class WeakRelation(float):
 
     @property
     def is_certain(self) -> bool:
-        """Trả về True nếu chân lý đạt tuyệt đối 1 (hoặc 1.0)."""
+        """Returns True if truth value is strictly 1 (or 1.0)."""
         return self.truth_value == 1
 
     def __repr__(self) -> str:
@@ -740,7 +740,7 @@ class WeakRelation(float):
         return self.__repr__()
 
     def detail(self) -> str:
-        """Trả về biểu thức chi tiết kèm ký hiệu quan hệ, ví dụ: ({1, 2}_u <= {1, 2}_u)_0.75."""
+        """Returns detailed expression with relation symbol, e.g.: ({1, 2}_u <= {1, 2}_u)_0.75."""
         tv_val = self.truth_value
         if isinstance(tv_val, Fraction) and tv_val.denominator == 1:
             tv_str = str(tv_val.numerator)
@@ -762,7 +762,7 @@ class WeakRelation(float):
 
 
 def _get_distinct_elements(unc: Any) -> List[Any]:
-    """Lấy danh sách các phần tử phân biệt của số bất định."""
+    """Extracts distinct elements of the uncertain number."""
     try:
         s = unc.to_set()
         data = list(s)
@@ -785,7 +785,7 @@ def _get_distinct_elements(unc: Any) -> List[Any]:
 def _normalize_weight_fn(
     unc: Any, elems: List[Any], weights: Any
 ) -> Callable[[Any], Union[float, Fraction]]:
-    """Chuẩn hóa hàm trọng số cho các phần tử của số bất định (Định nghĩa 2.15, 2.16)."""
+    """Normalizes weight function for elements of the uncertain number (Definitions 2.15, 2.16)."""
     if weights is None:
         weights = getattr(unc, "weights", None)
     if weights is None:
@@ -812,7 +812,7 @@ def _compute_weak_relation(
     weights_b: Any = None,
 ) -> WeakRelation:
     """
-    Tính toán quan hệ hai ngôi yếu mu(ARB) theo Định nghĩa 2.8 và 2.17.
+    Computes weak binary relation mu(ARB) according to Definition 2.8 and 2.17.
     """
     elems_a = _get_distinct_elements(a_unc)
     elems_b = _get_distinct_elements(b_unc)
@@ -844,7 +844,7 @@ def _compute_weak_relation(
 
     canonical_op = standard_ops.get(relation.lower()) if isinstance(relation, str) else None
 
-    # Tối ưu hóa bằng tìm kiếm nhị phân cho các quan hệ thứ tự chuẩn khi không có trọng số riêng
+    # Binary search optimization for standard order relations without custom weights
     if (
         not has_custom_weights
         and canonical_op is not None
@@ -870,7 +870,7 @@ def _compute_weak_relation(
         truth_val = Fraction(count, total_pairs)
         return WeakRelation(truth_val, a_unc, canonical_op, b_unc)
 
-    # Đường tính tổng quát (hỗ trợ trọng số hoặc quan hệ bất kỳ)
+    # General calculation path (supporting custom weights or arbitrary relations)
     if canonical_op == "<=":
         op_fn = lambda x, y: x <= y
     elif canonical_op == "<":
@@ -904,7 +904,7 @@ def _compute_weak_relation(
 class UncertainNumber:
     """
     Represents an Uncertain Number U(K) defined strictly via its Canonical Form (f_X, d_X).
-    Hỗ trợ số nguyên siêu lớn và độ chính xác cao qua Fraction / Python native int.
+    Supports arbitrarily large integers and high precision via Fraction / native Python int.
     """
 
     def __init__(
@@ -976,7 +976,7 @@ class UncertainNumber:
                         else:
                             self._formula_template = lambda var, c=val: f"{c}*{var}"
                     else:
-                        # Kiểm tra cấp số cộng — dùng Fraction để chính xác
+                        # Check arithmetic progression — use Fraction for exact precision
                         all_int_or_frac = all(isinstance(v, (int, Fraction)) for v in y_values)
                         if all_int_or_frac:
                             e0 = Fraction(y_values[0])
@@ -1038,7 +1038,7 @@ class UncertainNumber:
                             _xn, _yv = x_nodes[:], y_values[:]
                             self._formula_template = lambda v, xn=_xn, yv=_yv: lagrange_formula_str(xn, yv, v)
                         else:
-                            # Tra cứu mảng O(1)
+                            # O(1) array lookup
                             _yv_cap = y_values[:]
 
                             def _fast_eval(x: Numeric, _yv=_yv_cap, _n=n) -> Numeric:
@@ -1114,8 +1114,8 @@ class UncertainNumber:
 
     def to_set(self) -> Set[Any]:
         """
-        Lazy Evaluation: sinh tập kết quả từ miền chỉ số.
-        Dùng so sánh chính xác cho int/Fraction, không làm tròn float tùy tiện.
+        Lazy Evaluation: yields result set from index domain.
+        Uses exact comparison for int/Fraction without arbitrary float rounding.
         """
         if self.d == (0,) or (self.ast.get("type") == "leaf" and hasattr(self, "elements") and not self.elements):
             return set()
@@ -1180,7 +1180,7 @@ class UncertainNumber:
         return hash(self.to_set_key())
 
     def is_identical(self, other: Any) -> bool:
-        """Kiểm tra tính đồng nhất về cấu trúc/tập hợp kịch bản giữa hai số bất định."""
+        """Checks structural / scenario set identity between two uncertain numbers."""
         if isinstance(other, UncertainNumber):
             return self.to_set_key() == other.to_set_key()
         return False
@@ -1211,9 +1211,9 @@ class UncertainNumber:
         weights_other: Any = None,
     ) -> "WeakRelation":
         """
-        Tính toán quan hệ hai ngôi yếu mu(ARB) giữa hai số bất định.
-        Định nghĩa 2.8 & Định nghĩa 2.17.
-        Hỗ trợ cả hai dạng:
+        Computes weak binary relation mu(ARB) between two uncertain numbers.
+        Definition 2.8 & Definition 2.17.
+        Supports both forms:
             A.weak_relation(B, "<=")
             A.weak_relation("<=", B)
         """
@@ -1399,8 +1399,8 @@ class UncertainNumber:
 
     def contains(self, target: Any, rel_tol: float = 1e-7, abs_tol: float = 1e-9) -> bool:
         """
-        Kiểm tra một phần tử 'target' có thuộc số bất định hay không.
-        An toàn với số nguyên siêu lớn.
+        Checks whether target element belongs to the uncertain number.
+        Safe with arbitrarily large integers.
         """
         return _solve_ast_membership(self, target, rel_tol=rel_tol, abs_tol=abs_tol)
 
@@ -1412,7 +1412,7 @@ class UncertainNumber:
         target: Any = 0,
         var_names: Union[List[str], Tuple[str, ...], None] = None,
     ) -> List[Tuple[int, ...]]:
-        """Giải phương trình f(x_1, x_2, ..., x_k) = target trên cây AST."""
+        """Solves equation f(x_1, x_2, ..., x_k) = target over AST tree."""
         num_vars = len(self.d) if self.d and self.d != (0,) else 1
         if var_names is None:
             if num_vars == 1 and self.ast.get("type") == "leaf":
@@ -1630,7 +1630,7 @@ def pw(fn: Callable, *args: Any):
     Point-wise Space (o)_1 functional operator.
     Definition 3.2: (f)_1(A) := {f(x) : x in A}_u
 
-    Hỗ trợ hai kiểu gọi:
+    Supports two calling styles:
         pw(fn)        -> Callable[..., UncertainNumber]  (curried)
         pw(fn, A, B)  -> UncertainNumber                 (shorthand)
 
@@ -1695,7 +1695,7 @@ def epw(fn: Callable, *args: Any):
     Extended Point-wise Space (o)_1' functional operator.
     Supports broadcasting between scalars and multi-element UncertainNumbers.
 
-    Hỗ trợ hai kiểu gọi:
+    Supports two calling styles:
         epw(fn)           -> Callable[..., UncertainNumber]  (curried)
         epw(fn, X, 10)    -> UncertainNumber                 (shorthand)
 
@@ -1765,12 +1765,12 @@ def m(fn: Callable, *args: Any):
     """
     Minkowski Space (o)_m functional operator.
 
-    Định nghĩa tổng quát: với hàm vô hướng f(a, b, ...) trên số thực/phức,
-    lift lên không gian Minkowski:
+    General definition: for scalar function f(a, b, ...) on real/complex numbers,
+    lift to Minkowski space:
         m(f)(A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }
-    Miền chỉ số mới là tích Descartes d_A × d_B × ...
+    The new index domain is the Cartesian product d_A × d_B × ...
 
-    Hỗ trợ hai kiểu gọi:
+    Supports two calling styles:
         m(fn)           -> Callable[..., UncertainNumber]  (curried)
         m(fn, A, B)     -> UncertainNumber                 (shorthand)
 
@@ -1823,7 +1823,7 @@ def em(fn: Callable, *args: Any):
     Extended Minkowski Space (o)_m' functional operator.
     Supports inverse operations (e.g. scalar deconvolution, root extraction).
 
-    Hỗ trợ hai kiểu gọi:
+    Supports two calling styles:
         em(fn)      -> Callable[..., UncertainNumber]  (curried)
         em(fn, X)   -> UncertainNumber                 (shorthand)
 
@@ -1885,30 +1885,30 @@ def em(fn: Callable, *args: Any):
 
 def c(fns: list) -> Callable:
     """
-    Hàm hợp (function composition) — nhận danh sách callable có thứ tự.
+    Function composition — accepts an ordered list of callables.
 
-    Cú pháp: c([f, g, h]) = f ∘ g ∘ h
-    Tương đương: lambda *args: f(g(h(*args)))
-    Thứ tự áp dụng từ phải sang trái (như toán học):
-        phần tử cuối list được áp dụng trước, phần tử đầu áp dụng sau cùng.
+    Syntax: c([f, g, h]) = f ∘ g ∘ h
+    Equivalent to: lambda *args: f(g(h(*args)))
+    Application order is right-to-left (as in mathematics):
+        the last element of the list is applied first, the first element last.
 
-    Danh sách dài tùy ý, tối thiểu 1 phần tử.
+    List can be of arbitrary length, minimum 1 element.
 
-    Ví dụ:
+    Example:
         f_1 = m(lambda x: x + x)
         f_2 = pw(lambda x: x + x)
         h = c([f_2, f_1])   # h(x) = f_2(f_1(x))
         h(a)
     """
     if not fns:
-        raise ValueError("c() nhận ít nhất một callable trong danh sách.")
+        raise ValueError("c() requires at least one callable in the list.")
 
     for i, fn in enumerate(fns):
         if not callable(fn):
-            raise TypeError(f"c(): phần tử tại vị trí {i} không phải callable: {fn!r}")
+            raise TypeError(f"c(): element at index {i} is not callable: {fn!r}")
 
     def _composed(*args, **kwargs):
-        # Áp dụng từ phải sang trái
+        # Apply right-to-left
         result = fns[-1](*args, **kwargs)
         for fn in reversed(fns[:-1]):
             result = fn(result)
@@ -1921,9 +1921,9 @@ def c(fns: list) -> Callable:
 
 def s(*args: Any, **kwargs: Any) -> UncertainNumber:
     """
-    Khởi tạo nhanh số bất định (UncertainNumber).
+    Quick factory constructor for UncertainNumber.
 
-    Cách sử dụng:
+    Usage:
         s(1, 2, 3)              -> UncertainNumber({1, 2, 3})
         s({1, 2, 3})            -> UncertainNumber({1, 2, 3})
         s([1, 2, 3])            -> UncertainNumber([1, 2, 3])
@@ -1978,8 +1978,8 @@ def weak_relation(
     weights_second: Any = None,
 ) -> WeakRelation:
     """
-    Tính quan hệ hai ngôi yếu mu(ARB) giữa hai số bất định ở cấp module.
-    Định nghĩa 2.8 & 2.17.
+    Computes module-level weak binary relation mu(ARB) between two uncertain numbers.
+    Definition 2.8 & 2.17.
     """
     a_unc = _to_unc(first)
     b_unc = _to_unc(second)
@@ -1998,7 +1998,7 @@ def mu(
     weights_first: Any = None,
     weights_second: Any = None,
 ) -> WeakRelation:
-    """Alias cho weak_relation ở cấp module."""
+    """Module-level alias for weak_relation."""
     return weak_relation(
         first,
         second,

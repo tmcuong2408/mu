@@ -3,7 +3,7 @@ from typing import Callable, Union, List, Tuple, Set, Any
 
 # Type alias for numeric types (supporting both Real and Complex numbers)
 Numeric = Union[int, float, complex]
-from .UncertainNumber import UncertainNumber  # <--- Đảm bảo có từ khóa này
+from .UncertainNumber import UncertainNumber  # Ensure UncertainNumber import
 class EPointwiseArithmetic:
     """
     Engine for Extended Point-wise Arithmetic Space (o)_1'[cite: 1].

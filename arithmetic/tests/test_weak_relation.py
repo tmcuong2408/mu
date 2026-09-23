@@ -4,15 +4,15 @@ from arithmetic import UncertainNumber, WeakRelation, weak_relation, mu, s
 
 
 class TestWeakBinaryRelationTextbookExamples:
-    """Kiểm tra các ví dụ và định lý trực tiếp từ tài liệu 'Logic Mở Rộng Và Toán Học Bất Định'."""
+    """Tests examples and theorems directly from 'Extended Logic and Mathematics of Uncertainty'."""
 
     def test_example_2_3(self):
         """
-        Ví dụ 2.3:
-        Cho A = {1, 2}_u là một số bất định, ta có:
+        Example 2.3:
+        Let A = {1, 2}_u be an uncertain number, we have:
         (A <= A) = 0.75
         (A > A) = 0.25
-        Ta nhận xét: mu(A <= A) + mu(A > A) = 1. Mặc dù A = A nhưng về độ lớn thì khác nhau.
+        Notice: mu(A <= A) + mu(A > A) = 1. Although A = A, their relative magnitudes differ.
         """
         A = UncertainNumber({1, 2})
 
@@ -22,7 +22,7 @@ class TestWeakBinaryRelationTextbookExamples:
         assert isinstance(le_res, WeakRelation)
         assert isinstance(gt_res, WeakRelation)
 
-        # Kiểm tra giá trị chân lý chính xác
+        # Verify exact truth values
         assert le_res == 0.75
         assert le_res.truth_value == Fraction(3, 4)
         assert gt_res == 0.25
@@ -31,45 +31,45 @@ class TestWeakBinaryRelationTextbookExamples:
         # mu(A <= A) + mu(A > A) = 1
         assert le_res + gt_res == 1.0
 
-        # Kiểm tra biểu diễn chuỗi dạng con số số học [0, 1]
+        # Verify numeric string representation in [0, 1]
         assert str(le_res) == "0.75"
         assert repr(le_res) == "0.75"
         assert str(gt_res) == "0.25"
         assert repr(gt_res) == "0.25"
 
-        # Biểu thức chi tiết qua detail()
+        # Detailed expression via detail()
         assert le_res.detail() == "({1, 2}_u <= {1, 2}_u)_0.75"
         assert gt_res.detail() == "({1, 2}_u > {1, 2}_u)_0.25"
 
     def test_example_2_4(self):
         """
-        Ví dụ 2.4:
-        Cho A = {1, 2}_u và B = {3}_u = 3 thì A <= B.
+        Example 2.4:
+        For A = {1, 2}_u and B = {3}_u = 3, then A <= B.
         """
         A = UncertainNumber({1, 2})
         B = UncertainNumber({3})
 
-        # So sánh giữa hai UncertainNumber
+        # Comparison between two UncertainNumbers
         res1 = A <= B
         assert res1 == 1.0
         assert res1.is_certain
 
-        # So sánh trực tiếp với hằng số đơn trị 3 (số thực)
+        # Direct comparison with scalar constant 3 (real number)
         res2 = A <= 3
         assert res2 == 1.0
         assert res2.is_certain
 
-        # Phản xạ (reflected): 3 >= A
+        # Reflected comparison: 3 >= A
         res3 = 3 >= A
         assert res3 == 1.0
 
-        # A > 3 phải có chân lý bằng 0
+        # A > 3 must evaluate to 0 truth value
         assert (A > 3) == 0.0
 
     def test_theorem_2_2_equilibrium(self):
         """
-        Định lý 2.2 (Cân bằng):
-        Với X in U(R) có n phần tử phân biệt thì:
+        Theorem 2.2 (Equilibrium):
+        For X in U(R) having n distinct elements:
         mu(X <= X) = 1/2 + 1/(2n)
         """
         for n in [2, 3, 4, 5, 10, 50, 100]:
@@ -81,7 +81,7 @@ class TestWeakBinaryRelationTextbookExamples:
 
 
 class TestWeakBinaryRelationAllOperators:
-    """Kiểm tra toàn bộ 6 toán tử so sánh hai ngôi yếu."""
+    """Tests all 6 weak binary comparison operators."""
 
     def test_operators_duality(self):
         A = UncertainNumber({1, 3, 5})
@@ -97,14 +97,13 @@ class TestWeakBinaryRelationAllOperators:
         assert (A == B) + (A != B) == 1.0
 
     def test_pairwise_counts_verification(self):
-        # A = {1, 3}, B = {2, 4}
-        # Cặp A x B: (1,2), (1,4), (3,2), (3,4) (tổng 4 cặp)
+        # Pairs A x B: (1,2), (1,4), (3,2), (3,4) (total 4 pairs)
         # <= : (1,2), (1,4), (3,4) -> 3/4 = 0.75
         # <  : (1,2), (1,4), (3,4) -> 3/4 = 0.75
         # >= : (3,2) -> 1/4 = 0.25
         # >  : (3,2) -> 1/4 = 0.25
-        # == : không có -> 0.0
-        # != : cả 4 cặp -> 1.0
+        # == : none -> 0.0
+        # != : all 4 pairs -> 1.0
         A = UncertainNumber({1, 3})
         B = UncertainNumber({2, 4})
 
@@ -116,14 +115,14 @@ class TestWeakBinaryRelationAllOperators:
         assert (A != B) == 1.0
 
     def test_equality_operator(self):
-        # A = {1, 2}, A == A -> (1,1), (2,2) thỏa -> 2/4 = 0.5
+        # A = {1, 2}, A == A -> (1,1), (2,2) satisfied -> 2/4 = 0.5
         A = UncertainNumber({1, 2})
         assert (A == A) == 0.5
         assert (A != A) == 0.5
 
 
 class TestClassicalIdentity:
-    """Định lý 2.10 (Đồng nhất với số học cổ điển): singleton số bất định tương đương số thực."""
+    """Theorem 2.10 (Classical Identity): singleton uncertain numbers are equivalent to real numbers."""
 
     def test_singletons(self):
         a = UncertainNumber({5})
@@ -141,15 +140,15 @@ class TestClassicalIdentity:
 
 
 class TestWeightedWeakRelation:
-    """Định nghĩa 2.17: Quan hệ hai ngôi yếu có trọng số."""
+    """Definition 2.17: Weighted weak binary relation."""
 
     def test_weighted_relation(self):
         # A = {1, 2}, w_A(1) = 0.2, w_A(2) = 0.8
         # B = {1, 2}, w_B(1) = 0.5, w_B(2) = 0.5
-        # Cặp (1,1): 1<=1 -> 0.2 * 0.5 = 0.1
-        # Cặp (1,2): 1<=2 -> 0.2 * 0.5 = 0.1
-        # Cặp (2,1): 2<=1 -> False
-        # Cặp (2,2): 2<=2 -> 0.8 * 0.5 = 0.4
+        # Pair (1,1): 1<=1 -> 0.2 * 0.5 = 0.1
+        # Pair (1,2): 1<=2 -> 0.2 * 0.5 = 0.1
+        # Pair (2,1): 2<=1 -> False
+        # Pair (2,2): 2<=2 -> 0.8 * 0.5 = 0.4
         # mu(A <= B) = 0.1 + 0.1 + 0.4 = 0.6
         A = UncertainNumber({1, 2}, weights={1: Fraction(2, 10), 2: Fraction(8, 10)})
         B = UncertainNumber({1, 2}, weights={1: Fraction(5, 10), 2: Fraction(5, 10)})
@@ -160,10 +159,10 @@ class TestWeightedWeakRelation:
 
 
 class TestCustomAndConvenienceMethods:
-    """Kiểm tra weak_relation, mu và các dạng gọi khác nhau."""
+    """Tests weak_relation, mu and various calling conventions."""
 
     def test_custom_relation_divisibility(self):
-        # Quan hệ b chia hết cho a: b % a == 0
+        # Relation b divisible by a: b % a == 0
         A = UncertainNumber({2, 3})
         B = UncertainNumber({6, 7})
         # (2, 6): True
@@ -179,7 +178,7 @@ class TestCustomAndConvenienceMethods:
         A = UncertainNumber({1, 2})
         B = UncertainNumber({2, 3})
 
-        # Cả 2 thứ tự tham số đều được hỗ trợ
+        # Both parameter orders are supported
         assert A.mu(B, "<=") == A.weak_relation(B, "<=")
         assert A.mu("<=", B) == A.weak_relation(B, "<=")
 

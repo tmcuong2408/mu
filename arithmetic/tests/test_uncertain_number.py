@@ -98,7 +98,7 @@ class TestUncertainNumberFormulas:
         assert "_u" in r
         assert "{1, 2, 3}_u" == r
 
-        # Singleton {a}_u biểu diễn thành a (bỏ qua {}_u)
+        # Singleton {a}_u represented as a (omits {}_u)
         u_single = UncertainNumber({42})
         assert str(u_single) == "42"
         assert repr(u_single) == "42"

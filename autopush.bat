@@ -1,13 +1,13 @@
-:: Thêm tất cả thay đổi
+:: Add all changes
 git add .
 
-:: Commit với ngày tháng
+:: Commit with date and time
 git commit -m "Auto backup: %DATE% %TIME%"
 
-:: Push lên branch hiện tại
+:: Push to current branch
 git push
 
 echo ========================================
-echo   Hoan thanh!
+echo   Completed!
 echo ========================================
 pause

@@ -136,10 +136,10 @@ UncertainNumber.__pos__ = lambda self: Arithmetic.pos(self, space="m")
 UncertainNumber.__abs__ = lambda self: Arithmetic.abs(self, space="m")
 
 
-# ==================== MINKOWSKI LIFTING CHO HÀM VÔ HƯỚNG BẤT KỲ ====================
-# Định nghĩa tổng quát: với hàm vô hướng f(a, b, ...) trên số thực/phức,
-# lift lên không gian Minkowski:
-#   f_m(A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }  (tích Descartes A × B × ...)
+# ==================== MINKOWSKI LIFTING FOR ARBITRARY SCALAR FUNCTIONS ====================
+# General definition: for any scalar function f(a, b, ...) on real/complex numbers,
+# lift to Minkowski space:
+#   f_m(A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }  (Cartesian product A × B × ...)
 
 import builtins as _builtins
 
@@ -149,10 +149,10 @@ _builtin_min = _builtins.min
 
 def _minkowski_lift(scalar_fn, *args, **kwargs):
     """
-    Lift hàm vô hướng scalar_fn lên không gian Minkowski (o)_m:
+    Lift scalar function scalar_fn to Minkowski space (o)_m:
         f_m(A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }
-    Miền chỉ số mới là tích Descartes d_A × d_B × ...
-    Hàm sinh f(i_1, i_2, ...) = scalar_fn(A[i_1], B[i_2], ...).
+    The new index domain is the Cartesian product d_A × d_B × ...
+    Generative function: f(i_1, i_2, ...) = scalar_fn(A[i_1], B[i_2], ...).
     """
     unc_args = [Arithmetic._ensure_uncertain(a) for a in args]
     new_d = sum((u.d for u in unc_args), ())
@@ -178,54 +178,54 @@ def _minkowski_lift(scalar_fn, *args, **kwargs):
 
 def _unc_max(*args, **kwargs):
     """
-    Override của hàm max(), tuân thủ định nghĩa phép toán hai ngôi trên không gian Minkowski:
+    Override of max(), adhering to the binary operation definition on Minkowski space:
         max(A, B) = { max(a, b) : a ∈ A, b ∈ B }
-    Nếu không có UncertainNumber nào trong args, gọi lại builtin max() bình thường.
+    If no UncertainNumber is present in args, fallback to normal builtin max().
     """
-    # key=/default= không hỗ trợ trong Minkowski lifting → dùng builtin
+    # key=/default= not supported in Minkowski lifting -> fallback to builtin
     if kwargs.get("key") is not None or kwargs.get("default") is not None:
         return _builtin_max(*args, **kwargs)
-    # Không có UncertainNumber nào → dùng builtin bình thường
+    # No UncertainNumber found -> fallback to builtin
     if not any(isinstance(a, UncertainNumber) for a in args):
         return _builtin_max(*args, **kwargs)
-    # max(A) — 1 số bất định duy nhất: trả về max của tập hợp nội bộ
+    # max(A) — single uncertain number: return maximum of its internal set
     if len(args) == 1 and isinstance(args[0], UncertainNumber):
         elems = list(args[0].to_set())
         return _builtin_max(elems)
-    # max(A, B, ...) — nhiều đối số: Minkowski lifting
+    # max(A, B, ...) — multiple arguments: Minkowski lifting
     return _minkowski_lift(_builtin_max, *args)
 
 
 def _unc_min(*args, **kwargs):
     """
-    Override của hàm min(), tuân thủ định nghĩa phép toán hai ngôi trên không gian Minkowski:
+    Override of min(), adhering to the binary operation definition on Minkowski space:
         min(A, B) = { min(a, b) : a ∈ A, b ∈ B }
-    Nếu không có UncertainNumber nào trong args, gọi lại builtin min() bình thường.
+    If no UncertainNumber is present in args, fallback to normal builtin min().
     """
     if kwargs.get("key") is not None or kwargs.get("default") is not None:
         return _builtin_min(*args, **kwargs)
     if not any(isinstance(a, UncertainNumber) for a in args):
         return _builtin_min(*args, **kwargs)
-    # min(A) — 1 số bất định duy nhất: trả về min của tập hợp nội bộ
+    # min(A) — single uncertain number: return minimum of its internal set
     if len(args) == 1 and isinstance(args[0], UncertainNumber):
         elems = list(args[0].to_set())
         return _builtin_min(elems)
-    # min(A, B, ...) — nhiều đối số: Minkowski lifting
+    # min(A, B, ...) — multiple arguments: Minkowski lifting
     return _minkowski_lift(_builtin_min, *args)
 
 
 def lift_m(scalar_fn, *args):
     """
-    Lift hàm vô hướng scalar_fn lên không gian Minkowski (o)_m.
+    Lift scalar function scalar_fn to Minkowski space (o)_m.
 
-    Định nghĩa tổng quát: với hàm scalar f(a, b, ...) trên số thực/phức,
-    kế thừa lên không gian Minkowski:
+    General definition: for scalar function f(a, b, ...) on real/complex numbers,
+    extended to Minkowski space:
         lift_m(f, A, B, ...) = { f(a, b, ...) : a ∈ A, b ∈ B, ... }
 
-    Miền chỉ số mới là tích Descartes d_A × d_B × ...
-    Hàm sinh f(i_1, i_2, ...) = scalar_fn(A[i_1], B[i_2], ...).
+    The new index domain is the Cartesian product d_A × d_B × ...
+    Generative function: f(i_1, i_2, ...) = scalar_fn(A[i_1], B[i_2], ...).
 
-    Ví dụ:
+    Examples:
         a = s(1, 2, 4, 6, 7, 8, 9, 20, 100)
         b = s(1, 2)
         lift_m(max, a, b)   # {max(x,y) : x∈a, y∈b} = {2, 4, 6, 7, 8, 9, 20, 100}_u
@@ -234,6 +234,6 @@ def lift_m(scalar_fn, *args):
     return _minkowski_lift(scalar_fn, *args)
 
 
-# Ghi đè lên builtins — áp dụng toàn cục sau khi import Arithmetic
+# Override builtins globally upon importing Arithmetic
 _builtins.max = _unc_max
 _builtins.min = _unc_min

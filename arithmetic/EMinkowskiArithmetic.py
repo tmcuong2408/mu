@@ -10,7 +10,7 @@ Numeric = Union[int, float, complex, Fraction]
 
 
 def _exact_add_set(s: Set[Numeric], other: Set[Numeric]) -> Set[Numeric]:
-    """Tính Minkowski sum của hai tập, ưu tiên int/Fraction."""
+    """Compute Minkowski sum of two sets, preferring int/Fraction."""
     result = set()
     for x in s:
         for y in other:
@@ -20,7 +20,7 @@ def _exact_add_set(s: Set[Numeric], other: Set[Numeric]) -> Set[Numeric]:
 
 
 def _exact_mul_set(s: Set[Numeric], other: Set[Numeric]) -> Set[Numeric]:
-    """Tính Minkowski product của hai tập, ưu tiên int/Fraction."""
+    """Compute Minkowski product of two sets, preferring int/Fraction."""
     result = set()
     for x in s:
         for y in other:
@@ -55,14 +55,14 @@ def _solve_inverse_minkowski_sum(b_set: Set[Numeric], q: int) -> Union[Set[Numer
     """
     Solves for X such that (X^q_+)_m == b_set (Inverse Minkowski Sum).
     Definition 3.10: (1/q A)_{m'} := { X : (X^q_+)_m = A }_u.
-    Sử dụng Fraction để đảm bảo độ chính xác tuyệt đối.
+    Uses Fraction to ensure exact precision.
     """
     if q == 1:
         return b_set
     if not b_set:
         return set()
 
-    # Chuyển sang Fraction để so sánh chính xác
+    # Convert to Fraction for exact comparison
     b_set_f = set()
     for b in b_set:
         try:
@@ -74,11 +74,11 @@ def _solve_inverse_minkowski_sum(b_set: Set[Numeric], q: int) -> Union[Set[Numer
     b_min = sorted_b[0]
     b_max = sorted_b[-1]
 
-    # x_min = b_min / q, x_max = b_max / q — chính xác với Fraction
+    # x_min = b_min / q, x_max = b_max / q — exact with Fraction
     x_min = Fraction(b_min, q)
     x_max = Fraction(b_max, q)
 
-    # Chuyển về int nếu là số nguyên
+    # Convert to int if integral
     if x_min.denominator == 1:
         x_min = x_min.numerator
     if x_max.denominator == 1:
@@ -123,8 +123,8 @@ def _solve_inverse_minkowski_sum(b_set: Set[Numeric], q: int) -> Union[Set[Numer
 
 def _int_nth_root(n: int, p: int) -> Union[int, None]:
     """
-    Tính căn bậc p của n một cách chính xác (trả về int nếu là số nguyên chính xác).
-    Dùng Newton method với số nguyên để tránh lỗi float.
+    Compute exact integer p-th root of n (returns int if exact).
+    Uses integer arithmetic to avoid floating-point inaccuracies.
     """
     if n < 0:
         return None
@@ -135,13 +135,13 @@ def _int_nth_root(n: int, p: int) -> Union[int, None]:
     if p == 1:
         return n
     if p == 2:
-        # Dùng integer square root
+        # Use integer square root
         import math
         g = math.isqrt(n)
         if g * g == n:
             return g
         return None
-    # Newton's method cho n^(1/p)
+    # Newton's method for n^(1/p)
     import math
     g = int(round(n ** (1.0 / p)))
     for candidate in range(max(0, g - 2), g + 3):
@@ -153,14 +153,14 @@ def _int_nth_root(n: int, p: int) -> Union[int, None]:
 def _solve_all_inverse_minkowski_mul(b_set: Set[Numeric], q: int) -> List[UncertainNumber]:
     """
     Solves for all X such that (X^q_*)_m == b_set (Definition 3.11).
-    Dùng integer arithmetic chính xác khi có thể.
+    Uses exact integer arithmetic whenever possible.
     """
     if q == 1:
         return [UncertainNumber(b_set)]
     if not b_set:
         return []
 
-    # Kiểm tra xem tất cả có phải số nguyên dương không
+    # Check if all elements are positive integers
     b_list = list(b_set)
     all_positive_int = all(isinstance(b, int) and b > 0 for b in b_list)
     all_positive = all(
@@ -176,7 +176,7 @@ def _solve_all_inverse_minkowski_mul(b_set: Set[Numeric], q: int) -> List[Uncert
     solutions = []
 
     if all_positive_int:
-        # Chính xác hoàn toàn với số nguyên
+        # Fully exact with integer arithmetic
         b_min = sorted_b[0]
         b_max = sorted_b[-1]
 
@@ -184,7 +184,7 @@ def _solve_all_inverse_minkowski_mul(b_set: Set[Numeric], q: int) -> List[Uncert
         x_max = _int_nth_root(b_max, q)
 
         if x_min is None or x_max is None:
-            # Không phải perfect power — thử brute force với Fraction
+            # Not a perfect power — fallback to Fraction search
             pass
         else:
             cands = set()
@@ -226,7 +226,7 @@ def _solve_all_inverse_minkowski_mul(b_set: Set[Numeric], q: int) -> List[Uncert
 
             return solutions
 
-    # Fallback với float cho số không nguyên
+    # Float fallback for non-integer sets
     sorted_b_f = [float(b) for b in sorted_b]
     b_min_f = sorted_b_f[0]
     b_max_f = sorted_b_f[-1]
@@ -278,7 +278,7 @@ class EMinkowskiArithmetic:
     Extends (o)_m with fractional powers, ratio spaces, and inverse equation solvers.
     Definition 3.10: (p/q A)_{m'} := { X : (X^q_+)_m = (A^p_+)_m }_u
     Definition 3.11: (A^{p/q})_{m'} := { X : (X^q_*)_m = (A^p_*)_m }_u
-    Hỗ trợ số nguyên siêu lớn qua Fraction và int arithmetic chính xác.
+    Supports arbitrarily large integers via exact Fraction and integer arithmetic.
     """
 
     @staticmethod

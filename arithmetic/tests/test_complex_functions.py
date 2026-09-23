@@ -47,7 +47,7 @@ class Test_Complex_Functions:
 
 class Test_Composition_c:
     def test_c_two_functions(self):
-        # c([f_2, f_1]) = f_2 ∘ f_1, tức là f_2(f_1(a))
+        # c([f_2, f_1]) = f_2 ∘ f_1, i.e. f_2(f_1(a))
         a = s(1, 2)
         f_1 = m(lambda x: x + x)
         f_2 = pw(lambda x: x + x)
@@ -55,7 +55,7 @@ class Test_Composition_c:
         assert h(a).to_set() == {4, 6, 8}
 
     def test_c_two_functions_reversed(self):
-        # c([f_1, f_2]) = f_1 ∘ f_2, tức là f_1(f_2(a))
+        # c([f_1, f_2]) = f_1 ∘ f_2, i.e. f_1(f_2(a))
         a = s(1, 2)
         f_1 = m(lambda x: x + x)
         f_2 = pw(lambda x: x + x)
@@ -72,14 +72,14 @@ class Test_Composition_c:
         assert h(a).to_set() == f_3(f_2(f_1(a))).to_set()
 
     def test_c_single_function(self):
-        # c([f]) với một phần tử là identity composition
+        # c([f]) with single element is identity composition
         a = s(1, 2, 3)
         f = pw(lambda x: x * 2)
         h = c([f])
         assert h(a).to_set() == f(a).to_set()
 
     def test_c_reusable(self):
-        # callable trả về có thể tái dùng trên nhiều input
+        # returned callable can be reused on multiple inputs
         f_1 = m(lambda x: x + x)
         f_2 = pw(lambda x: x + x)
         h = c([f_2, f_1])
