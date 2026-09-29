@@ -7,6 +7,8 @@ f = lambda x: x + x
 
 # 2. Tính đồ thị: Vẫn dùng cây AST, chưa tính toán (Lazy)
 g = pgr(f, X)
+
+print(g)
 #print(g.is_computed)   # False: mới chỉ dựng cây AST, chưa hề sinh các điểm (x, y)
 #print(g.ast["type"])   # 'pgr'
 
