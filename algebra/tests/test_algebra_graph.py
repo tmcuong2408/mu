@@ -1,14 +1,14 @@
 from arithmetic import UncertainNumber
 from algebra import graph, pgr, gr, draw, draw_ascii, draw_ast, Algebra
 
-# 1. Khởi tạo số bất định X và hàm f(X) = X + X
-X = UncertainNumber({1, 2})
-f = lambda x: x + x
+# 1. Khởi tạo số bất định X và hàm f(X) = X*X + X + X
+X = UncertainNumber({1, 2,3,4,5,6,7,8,9,10})
+f = lambda x: (x * x + x +x ** x ) % 256
 
 # 2. Tính đồ thị: Vẫn dùng cây AST, chưa tính toán (Lazy)
 g = pgr(f, X)
 
-print(g)
+print(g[1:100])
 #print(g.is_computed)   # False: mới chỉ dựng cây AST, chưa hề sinh các điểm (x, y)
 #print(g.ast["type"])   # 'pgr'
 
