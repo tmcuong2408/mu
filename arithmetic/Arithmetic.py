@@ -106,6 +106,14 @@ class Arithmetic:
             ast_node={"type": "custom_fn", "space_type": "minkowski"},
         )
 
+    @classmethod
+    def approximate(cls, a: Any, n: int = 0) -> UncertainNumber:
+        return cls._ensure_uncertain(a).approximate(n)
+
+    @classmethod
+    def round(cls, a: Any, n: int = 0) -> UncertainNumber:
+        return cls._ensure_uncertain(a).round(n)
+
 
 # ==================== OVERLOAD DEFAULT MAGIC METHODS ====================
 # Default magic operators (+, -, *, /, //, %, **) strictly fall back to Minkowski space 'm'

@@ -82,6 +82,46 @@ B = UncertainNumber({1, 2}, weights={1: 0.5, 2: 0.5})
 # Total mu = 0.1 + 0.1 + 0.4 = 0.6
 print(A <= B)       # 0.6
 print(A.mu("<=", B)) # 0.6
+
+# 7. Approximation and rounding to the n-th digit:
+X = UncertainNumber({1.23456, 2.71828})
+print(X.approximate(2))  # {123/100, 68/25}_u  (1.23 and 2.72)
+print(X.approx(2))       # Alias for approximate(2)
+print(X.round(2))        # Alias for approximate(2)
+print(round(X, 2))       # Native Python round() support
+```
+
+## Approximation & Rounding to the n-th Digit
+
+The `UncertainNumber` class supports precision approximation and rounding to the $n$-th digit via `.approximate(n)`, `.approx(n)`, `.round(n)`, and Python's standard `round(X, n)`:
+
+- **Fractional Digits ($n > 0$):** Rounds each element to $n$ decimal places.
+- **Integer Rounding ($n = 0$):** Rounds elements to nearest integers.
+- **Powers of Ten ($n < 0$):** Rounds to nearest tens, hundreds, etc. (e.g. `n = -1` rounds to tens).
+- **Weight Preserving & Merging:** If multiple values collapse to the same rounded value, their probability weights are automatically aggregated.
+- **Multi-Type Support:** Seamlessly handles `int`, `float`, `Fraction`, `Decimal`, `complex`, and nested `UncertainNumber` instances.
+
+```python
+from arithmetic import UncertainNumber, approximate, approx, Arithmetic
+
+# Floating-point uncertain numbers
+U = UncertainNumber({1.23456, 2.71828})
+print(U.approximate(2))  # {1.23, 2.72} exact representation
+
+# Builtin round support
+print(round(U, 2))       # {1.23, 2.72}
+print(round(U))          # {1, 3}
+
+# Weighted uncertain numbers with merging
+W = UncertainNumber({1.234, 1.231, 3.456}, weights={1.234: 0.2, 1.231: 0.3, 3.456: 0.5})
+W_rounded = W.approximate(2)
+# 1.234 and 1.231 merge into 1.23 with total weight 0.2 + 0.3 = 0.5
+print(W_rounded.mu("<=", 1.25))  # 0.5
+
+# Module-level convenience functions
+print(approximate(U, 2))
+print(approx(U, 2))
+print(Arithmetic.approximate(U, 2))
 ```
 
 ## Minkowski Lifting — Extending Scalar Functions to Minkowski Space

@@ -192,3 +192,72 @@ class TestSolveEquation:
         # f(x) = x, target = 3 -> index 3
         sols = u.solve_equation(3)
         assert (3,) in sols
+
+
+class TestUncertainNumberApproximation:
+    def test_approximate_floats(self):
+        u = UncertainNumber({1.23456, 2.71828})
+        res = u.approximate(2)
+        assert 1.23 in res
+        assert 2.72 in res
+        assert len(res) == 2
+
+    def test_approx_and_round_aliases(self):
+        u = UncertainNumber({1.23456, 2.71828})
+        res1 = u.approximate(2)
+        res2 = u.approx(2)
+        res3 = u.round(2)
+        res4 = round(u, 2)
+        assert res1.to_set() == res2.to_set() == res3.to_set() == res4.to_set()
+
+    def test_approximate_integer_ndigits_zero(self):
+        u = UncertainNumber({1.2, 2.7})
+        res = u.approximate(0)
+        assert res.to_set() == {1, 3}
+        assert round(u).to_set() == {1, 3}
+
+    def test_approximate_negative_ndigits(self):
+        u = UncertainNumber({123, 456})
+        res = u.approximate(-1)
+        assert res.to_set() == {120, 460}
+
+    def test_approximate_fractions(self):
+        from fractions import Fraction
+        u = UncertainNumber({Fraction(1, 3), Fraction(2, 3)})
+        res = u.approximate(2)
+        assert Fraction(33, 100) in res
+        assert Fraction(67, 100) in res
+
+    def test_approximate_complex(self):
+        u = UncertainNumber({1.234 + 5.678j})
+        res = u.approximate(2)
+        assert (1.23 + 5.68j) in res
+
+    def test_approximate_with_weights_merging(self):
+        u = UncertainNumber({1.234, 1.231, 3.456}, weights={1.234: 0.2, 1.231: 0.3, 3.456: 0.5})
+        res = u.approximate(2)
+        # 1.234 and 1.231 merge into 1.23 with total weight 0.2 + 0.3 = 0.5
+        assert res.mu("<=", 1.25) == pytest.approx(0.5)
+        assert res.mu("<=", 4.0) == pytest.approx(1.0)
+
+    def test_approximate_ast_expression(self):
+        from arithmetic import pw
+        X = UncertainNumber({1, 2, 4})
+        Y = pw(lambda x: x / 3, X)
+        res = Y.approximate(2)
+        assert 0.33 in res
+        assert 0.67 in res
+        assert 1.33 in res
+
+    def test_module_level_helpers(self):
+        from arithmetic import approximate, approx, Arithmetic
+        u = UncertainNumber({1.2345, 2.3456})
+        r1 = approximate(u, 2)
+        r2 = approx(u, 2)
+        r3 = Arithmetic.approximate(u, 2)
+        r4 = Arithmetic.round(u, 2)
+        assert r1.to_set() == r2.to_set() == r3.to_set() == r4.to_set()
+
+    def test_approximate_empty(self):
+        u = UncertainNumber(set())
+        assert u.approximate(2).to_set() == set()

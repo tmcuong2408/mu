@@ -60,6 +60,11 @@ print(f"A_rel.mu('<=', B_rel) = {val_mu}")  # 0.75
 
 val_mu_mod = mu(A_rel, B_rel, "<=")
 print(f"mu(A_rel, B_rel, '<=') = {val_mu_mod}")  # 0.75
+
+# 6. Approximation to the n-th digit
+U_approx = UncertainNumber({1.23456, 2.71828})
+print(f"U.approximate(2) = {U_approx.approximate(2)}")  # {123/100, 68/25}_u
+print(f"round(U, 2)       = {round(U_approx, 2)}")       # Native Python round()
 ```
 
 ## Functional Space Operators: `pw`, `epw`, `m`, `em`

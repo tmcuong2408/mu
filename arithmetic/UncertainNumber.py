@@ -85,6 +85,43 @@ def _safe_round_val(val: Any) -> Any:
     return val
 
 
+def _round_element(x: Any, n: int = 0) -> Any:
+    """
+    Rounds/approximates a single scalar or element to the n-th digit.
+    Resilient across int, float, Fraction, Decimal, and complex types.
+    """
+    if isinstance(x, bool):
+        return x
+    if hasattr(x, "approximate") and callable(x.approximate):
+        return x.approximate(n)
+    if isinstance(x, complex):
+        r = _round_element(x.real, n)
+        i = _round_element(x.imag, n)
+        if i == 0:
+            return r
+        return complex(r, i)
+    if isinstance(x, Fraction):
+        res = round(x, n)
+        if n <= 0 and res.denominator == 1:
+            return int(res)
+        return res
+    if isinstance(x, (int, float, Decimal)):
+        res = round(x, n)
+        if n <= 0:
+            return int(res)
+        return res
+    try:
+        res = round(x, n)
+        if n <= 0:
+            try:
+                return int(res)
+            except Exception:
+                return res
+        return res
+    except Exception:
+        return x
+
+
 # ==================== LAGRANGE INTERPOLATION ====================
 
 def lagrange_interpolation(x_nodes: List[int], y_values: List[Numeric]) -> Callable[[Numeric], Numeric]:
@@ -1467,6 +1504,96 @@ class UncertainNumber:
             pass
         return self.__repr__()
 
+    # ==================== APPROXIMATION / ROUNDING ====================
+
+    def approximate(self, n: int = 0) -> "UncertainNumber":
+        """
+        Approximates/rounds each element in the UncertainNumber to the n-th digit.
+
+        Parameters:
+            n (int): Number of decimal places to round to. Defaults to 0.
+                     Positive values round to fractional digits, 0 rounds to integers,
+                     and negative values round to powers of 10.
+
+        Returns:
+            UncertainNumber: A new UncertainNumber with rounded elements.
+        """
+        if n is None:
+            n = 0
+        else:
+            n = int(n)
+
+        if self.d == (0,) or (hasattr(self, "elements") and self.elements is not None and len(self.elements) == 0):
+            return UncertainNumber(set())
+
+        new_weights = None
+        if self.weights is not None:
+            if isinstance(self.weights, dict):
+                new_weights = {}
+                for k, w in self.weights.items():
+                    rk = _round_element(k, n)
+                    rk_safe = _safe_round_val(rk)
+                    w_exact = _to_exact(w)
+                    new_weights[rk_safe] = new_weights.get(rk_safe, Fraction(0)) + w_exact
+                    if rk != rk_safe:
+                        new_weights[rk] = new_weights[rk_safe]
+            elif isinstance(self.weights, (list, tuple)):
+                new_weights = {}
+                if hasattr(self, "elements") and self.elements is not None:
+                    source_elems = list(self.elements)
+                elif self.index_length <= 50000:
+                    source_elems = [self.evaluate_at_index(self.flat_index_to_tuple(i)) for i in range(min(self.index_length, len(self.weights)))]
+                else:
+                    source_elems = []
+                for elem, w in zip(source_elems, self.weights):
+                    rk = _round_element(elem, n)
+                    rk_safe = _safe_round_val(rk)
+                    w_exact = _to_exact(w)
+                    new_weights[rk_safe] = new_weights.get(rk_safe, Fraction(0)) + w_exact
+                    if rk != rk_safe:
+                        new_weights[rk] = new_weights[rk_safe]
+            elif callable(self.weights):
+                orig_weights = self.weights
+                new_weights = lambda x: orig_weights(x)
+
+        if self.ast.get("type") == "leaf" and hasattr(self, "elements") and self.elements is not None:
+            elems = list(self.elements)
+            rounded_elems = [_safe_round_val(_round_element(x, n)) for x in elems]
+            return UncertainNumber(rounded_elems, weights=new_weights)
+        elif len(self.d) == 1 and self.index_length <= 50000:
+            all_vals = [self.evaluate_at_index((i,)) for i in range(1, self.d[0] + 1)]
+            rounded_elems = [_safe_round_val(_round_element(v, n)) for v in all_vals]
+            return UncertainNumber(rounded_elems, weights=new_weights)
+        else:
+            def gen_fn(idx):
+                val = self.evaluate_at_index(idx)
+                return _safe_round_val(_round_element(val, n)) if val is not None else None
+
+            ast_node = {
+                "type": "custom_fn",
+                "space_type": "pointwise",
+                "child": self.ast,
+                "formula_template": lambda v: f"round({self.get_formula([v] if isinstance(v, str) else v)}, {n})",
+            }
+            return UncertainNumber(
+                generative_fn=gen_fn,
+                index_domain=self.d,
+                ast_node=ast_node,
+                weights=new_weights,
+            )
+
+    def approx(self, n: int = 0) -> "UncertainNumber":
+        """Alias for approximate(n)."""
+        return self.approximate(n)
+
+    def round(self, n: int = 0) -> "UncertainNumber":
+        """Alias for approximate(n)."""
+        return self.approximate(n)
+
+    def __round__(self, ndigits: Optional[int] = 0) -> "UncertainNumber":
+        """Supports Python builtin round(unc, ndigits)."""
+        return self.approximate(0 if ndigits is None else ndigits)
+
     # ==================== FUNCTIONAL SPACE OPERATORS ====================
 
     @staticmethod
@@ -1574,6 +1701,13 @@ class _PwExpr:
         return _PwExpr(
             eval_fn=lambda idx: abs(self.eval_fn(idx)),
             formula_fn=lambda var: f"abs({self.formula_fn(var)})",
+        )
+
+    def __round__(self, n: Optional[int] = 0):
+        n_val = 0 if n is None else n
+        return _PwExpr(
+            eval_fn=lambda idx: _safe_round_val(_round_element(self.eval_fn(idx), n_val)),
+            formula_fn=lambda var: f"round({self.formula_fn(var)}, {n_val})",
         )
 
 
@@ -2006,4 +2140,16 @@ def mu(
         weights_first=weights_first,
         weights_second=weights_second,
     )
+
+
+def approximate(unc: Any, n: int = 0) -> UncertainNumber:
+    """
+    Approximates an UncertainNumber or numeric collection to the n-th digit.
+    """
+    return _to_unc(unc).approximate(n)
+
+
+def approx(unc: Any, n: int = 0) -> UncertainNumber:
+    """Module-level alias for approximate."""
+    return approximate(unc, n)
 

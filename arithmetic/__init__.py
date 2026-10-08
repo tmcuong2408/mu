@@ -1,4 +1,4 @@
-from .UncertainNumber import UncertainNumber, WeakRelation, weak_relation, mu, pw, epw, m, em, s, c
+from .UncertainNumber import UncertainNumber, WeakRelation, weak_relation, mu, pw, epw, m, em, s, c, approximate, approx
 
 from .Arithmetic import Arithmetic, lift_m
 from .PointwiseArithmetic import PointwiseArithmetic
@@ -23,6 +23,9 @@ __all__ = [
     "m",
     "em",
     "s",
+    "c",
+    "approximate",
+    "approx",
     "lift_m",
     "__version__",
 ]
