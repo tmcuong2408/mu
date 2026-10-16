@@ -3,16 +3,17 @@ import sys
 from typing import Any, Optional, Tuple, Union, List, Dict
 from fractions import Fraction
 
-# Setup non-GUI backend when no display is found
-_has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-if not _has_display:
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-    except Exception:
-        pass
-
-import matplotlib.pyplot as plt
+def _get_plt():
+    """Lazily configures and imports matplotlib.pyplot."""
+    _has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if not _has_display:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+        except Exception:
+            pass
+    import matplotlib.pyplot as plt
+    return plt, _has_display
 
 
 def _extract_xy(pts: List[Tuple[Any, Any]]) -> Tuple[List[float], List[float]]:
@@ -100,7 +101,7 @@ def draw(
     save_path: Optional[str] = None,
     show: bool = True,
     figsize: Tuple[int, int] = (9, 6),
-    ax: Optional[plt.Axes] = None,
+    ax: Optional[Any] = None,
     return_fig: bool = False,
     **kwargs: Any,
 ) -> Any:
@@ -138,6 +139,8 @@ def draw(
 
     # Determine graph type
     is_complete = isinstance(graph_obj, CompleteGraph)
+
+    plt, _has_display = _get_plt()
 
     created_fig = False
     if ax is None:
@@ -207,7 +210,7 @@ def draw(
 
 
 def _plot_subgraph(
-    ax: plt.Axes,
+    ax: Any,
     xs: List[float],
     ys: List[float],
     color: str,

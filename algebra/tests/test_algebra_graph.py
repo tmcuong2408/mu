@@ -3,7 +3,8 @@ from algebra import graph, pgr, gr, draw, draw_ascii, draw_ast, Algebra
 
 # 1. Khởi tạo số bất định X và hàm f(X) = X*X + X + X
 X = UncertainNumber({1, 2,3,4,5,6,7,8,9,10})
-f = lambda x: (x * x + x +x ** x ) % 256
+Y =UncertainNumber({2,4,5,65})
+f = lambda x: (x*x +Y*  x*x +x*x +x + x * x + x +x ** x ) % 256
 
 # 2. Tính đồ thị: Vẫn dùng cây AST, chưa tính toán (Lazy)
 g = pgr(f, X)
@@ -21,12 +22,12 @@ g = pgr(f, X)
 #draw(g, title="Đồ thị hàm số bất định f(X) = X + X", save_path="graph.png")
 
 # Hoặc gọi trực tiếp từ object:
-g.draw()
+#g.draw()
 
 # 5. Vẽ dạng ký tự ASCII trực tiếp trên Terminal:
 #print(draw_ascii(g))
 
 # 6. Xem cấu trúc cây AST:
-draw_ast(g)
+#draw_ast(g)
 
 #g.draw()

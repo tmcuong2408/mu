@@ -40,8 +40,10 @@ $$gr(f) := \{ pgr_f(X) : X \in \mathcal{X} \}$$
 - When calling `graph(f, A)` or `pgr(f, A)`, the graph is represented as an Abstract Syntax Tree (AST) node connecting the scenario index domains:
   - Minkowski Space: $d_{pgr} = d_A \times d_{f(A)}$
   - Pointwise Space: $d_{pgr} = d_A$
-- **Strictly Lazy**: No scenario coordinate pairs are evaluated upon creation.
-- **Evaluation on Demand**: Actual calculation only takes place when `print(g)`, `repr(g)`, `g.to_set()`, or `draw(g)` is called.
+- **Strictly Lazy**: No scenario coordinate pairs are evaluated upon creation (`is_computed == False`).
+- **Debugger & REPL Safety**: Inspection via `repr(g)` produces a lightweight summary (`<UncertainGraph (lazy): domain=..., space='...'>`) without forcing computation.
+- **Evaluation on Demand**: Actual point generation only occurs when `print(g)`, `str(g)`, `g.to_set()`, `g.points`, or `draw(g)` is explicitly invoked. Once calculated, results are cached.
+- **Fast Startup**: Drawing utilities lazily import `matplotlib`, avoiding heavy initialization delays when only working with AST representations or terminal ASCII charts.
 
 ---
 
@@ -56,11 +58,13 @@ X = UncertainNumber({1, 2})
 f = lambda x: x + x
 
 g = pgr(f, X)
+print(repr(g))         # <UncertainGraph (lazy): domain=(2, 2, 2), space='minkowski'>
 print(g.is_computed)   # False (Only the AST tree is constructed, no calculations yet)
 
-# Calculations execute strictly when printed:
+# Calculations execute strictly when printed or evaluated:
 print(g)               # {(1, 2), (1, 3), (1, 4), (2, 2), (2, 3), (2, 4)}_u
 print(g.is_computed)   # True (Evaluated and cached)
+print(repr(g))         # {(1, 2), (1, 3), (1, 4), (2, 2), (2, 3), (2, 4)}_u
 
 # 2. Graph in Point-wise Space (o)_1
 f_pw = lambda x: x**2

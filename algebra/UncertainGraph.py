@@ -197,6 +197,20 @@ class UncertainGraph(UncertainNumber):
 
     def __repr__(self) -> str:
         """
+        Returns a concise lazy representation if not yet evaluated,
+        preventing unexpected execution in debuggers, REPLs, and variable viewers.
+        If already evaluated, returns the canonical uncertain set notation.
+        """
+        if not self._is_computed:
+            return f"<UncertainGraph (lazy): domain={self.d}, space='{self.space_type}'>"
+        pts = self.points
+        if not pts:
+            return "{}_u"
+        inner = ", ".join(f"({x}, {y})" for x, y in pts)
+        return f"{{{inner}}}_u"
+
+    def __str__(self) -> str:
+        """
         Triggers evaluation and returns canonical uncertain set notation:
             {(x1, y1), (x2, y2), ...}_u
         """
@@ -205,9 +219,6 @@ class UncertainGraph(UncertainNumber):
             return "{}_u"
         inner = ", ".join(f"({x}, {y})" for x, y in pts)
         return f"{{{inner}}}_u"
-
-    def __str__(self) -> str:
-        return self.__repr__()
 
     def draw(self, **kwargs) -> Any:
         """Draws this graph using the draw module."""
@@ -290,13 +301,25 @@ class CompleteGraph:
         )
 
     def __repr__(self) -> str:
-        self._is_computed = True
+        """
+        Returns a concise lazy representation if not yet evaluated.
+        If already evaluated, returns the canonical complete graph notation.
+        """
+        if not self._is_computed:
+            return f"<CompleteGraph (lazy): domain_size={len(self.domain)}, space='{self.space}'>"
         sub_reprs = [repr(g) for g in self.subgraphs]
         inner = ", ".join(sub_reprs)
         return f"{{{inner}}}_u"
 
     def __str__(self) -> str:
-        return self.__repr__()
+        """
+        Triggers evaluation and returns canonical complete graph notation:
+            {{(x1, y1), ...}_u, ...}_u
+        """
+        self._is_computed = True
+        sub_strs = [str(g) for g in self.subgraphs]
+        inner = ", ".join(sub_strs)
+        return f"{{{inner}}}_u"
 
     def __iter__(self):
         return iter(self.subgraphs)
