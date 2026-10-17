@@ -10,12 +10,12 @@ f = lambda x: (x*x +Y*  x*x +x*x +x + x * x + x +x ** x ) % 256
 g = pgr(f, X)
 
 #print(g[1:100])
-#print(g.is_computed)   # False: mới chỉ dựng cây AST, chưa hề sinh các điểm (x, y)
-#print(g.ast["type"])   # 'pgr'
-
+print(g.is_computed)   # False: mới chỉ dựng cây AST, chưa hề sinh các điểm (x, y)
+print(g.ast["type"])   # 'pgr'
 # 3. Chỉ thực sự tính toán khi gọi print:
-#print(g)               # {(1, 2), (1, 3), (1, 4), (2, 2), (2, 3), (2, 4)}_u
-#print(g.is_computed)   # True: đã tính toán và cache kết quả
+for i in range(100000):
+    print(g[i])
+print(g.is_computed)   # True: đã tính toán và cache kết quả
 
 # 4. Vẽ đồ thị đã tính toán ở trên:
 # Vẽ bằng matplotlib (có thể truyền save_path để lưu file ảnh)
@@ -29,5 +29,4 @@ g = pgr(f, X)
 
 # 6. Xem cấu trúc cây AST:
 #draw_ast(g)
-
 #g.draw()
