@@ -1,9 +1,13 @@
+import os
+import json
+import pickle
+from pathlib import Path
 import math
 import itertools
 import bisect
 from fractions import Fraction
 from decimal import Decimal, getcontext, ROUND_HALF_EVEN, InvalidOperation
-from typing import Callable, Union, List, Tuple, Set, Any
+from typing import Callable, Union, List, Tuple, Set, Any, Optional, Dict
 
 # High precision for Decimal (512 decimal places)
 getcontext().prec = 512
@@ -938,6 +942,220 @@ def _compute_weak_relation(
     return WeakRelation(total_truth, a_unc, op_str, b_unc)
 
 
+# ==================== AST SERIALIZATION & DESERIALIZATION HELPERS ====================
+
+_BINARY_OPS: Dict[str, Callable[[Any, Any], Any]] = {
+    "+": lambda a, b: a + b,
+    "-": lambda a, b: a - b,
+    "*": lambda a, b: a * b,
+    "/": lambda a, b: a / b,
+    "//": lambda a, b: a // b,
+    "%": lambda a, b: a % b,
+    "**": lambda a, b: a ** b,
+    "min": lambda a, b: min(a, b),
+    "max": lambda a, b: max(a, b),
+    "gcd": lambda a, b: math.gcd(a, b),
+    "lcm": lambda a, b: math.lcm(a, b),
+}
+
+
+def _serialize_ast_value(v: Any) -> Any:
+    """Helper to convert numeric values and objects into JSON-serializable structures."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        if math.isinf(v):
+            return {"__type__": "float", "value": "inf" if v > 0 else "-inf"}
+        if math.isnan(v):
+            return {"__type__": "float", "value": "nan"}
+        return v
+    if isinstance(v, Fraction):
+        return {
+            "__type__": "Fraction",
+            "numerator": v.numerator,
+            "denominator": v.denominator,
+        }
+    if isinstance(v, complex):
+        return {
+            "__type__": "complex",
+            "real": _serialize_ast_value(v.real),
+            "imag": _serialize_ast_value(v.imag),
+        }
+    if isinstance(v, Decimal):
+        return {"__type__": "Decimal", "value": str(v)}
+    if isinstance(v, range):
+        return {"__type__": "range", "start": v.start, "stop": v.stop, "step": v.step}
+    if isinstance(v, tuple):
+        return {"__type__": "tuple", "items": [_serialize_ast_value(x) for x in v]}
+    if isinstance(v, list):
+        return [_serialize_ast_value(x) for x in v]
+    if isinstance(v, set):
+        return {"__type__": "set", "items": [_serialize_ast_value(x) for x in sorted(list(v), key=lambda x: str(x))]}
+    if hasattr(v, "to_ast_dict"):
+        return v.to_ast_dict()
+    return v
+
+
+def _deserialize_ast_value(obj: Any) -> Any:
+    """Helper to restore exact numeric and object types from serialized JSON structures."""
+    if isinstance(obj, dict) and "__type__" in obj:
+        t = obj["__type__"]
+        if t == "Fraction":
+            return Fraction(obj["numerator"], obj["denominator"])
+        elif t == "complex":
+            return complex(_deserialize_ast_value(obj["real"]), _deserialize_ast_value(obj["imag"]))
+        elif t == "Decimal":
+            return Decimal(obj["value"])
+        elif t == "float":
+            return float(obj["value"])
+        elif t == "range":
+            return range(obj["start"], obj["stop"], obj["step"])
+        elif t == "tuple":
+            return tuple(_deserialize_ast_value(x) for x in obj["items"])
+        elif t == "set":
+            return set(_deserialize_ast_value(x) for x in obj["items"])
+        elif t == "UncertainNumber":
+            return UncertainNumber.from_ast_dict(obj)
+    if isinstance(obj, list):
+        return [_deserialize_ast_value(x) for x in obj]
+    return obj
+
+
+def _leaf_to_fn_dict(unc: Any) -> dict:
+    """
+    Converts a leaf UncertainNumber's data into a compact multivariate polynomial descriptor.
+
+    The descriptor has the form::
+
+        {"type": "poly", "vars": ["k"], "expr": "<expr>", "n": <count>}
+
+    where ``expr`` is a Python-evaluable polynomial expression in the index variables
+    (e.g. ``"1 + (k - 1) * 2"`` for an arithmetic progression starting at 1 with step 2).
+
+    Multi-dimensional UncertainNumbers use ``"vars": ["k1", "k2", ...]``.
+
+    Falls back to ``{"type": "set", "values": [...], "n": <count>}`` when no closed-form
+    polynomial is available (large lookup tables, complex values, etc.).
+    """
+    elems = getattr(unc, "elements", None)
+    d = getattr(unc, "d", (0,))
+    n_dims = len(d)
+
+    # Build variable name list: x_1, x_2, ...
+    var_names = [f"x_{i + 1}" for i in range(n_dims)]
+
+    n_total = 1
+    for di in d:
+        n_total *= di
+
+    # --- n=1 special case: constant function, serialize as the bare value ---
+    if d == (1,) and isinstance(elems, (list, tuple, range)) and len(elems) == 1:
+        val = elems[0] if not isinstance(elems, range) else next(iter(elems))
+        return {"type": "poly", "vars": var_names, "expr": str(_serialize_ast_value(val)), "n": list(d)}
+
+    # --- Try to get a real polynomial expression from _formula_template ---
+    formula_template = getattr(unc, "_formula_template", None)
+    if formula_template is not None:
+        try:
+            expr = formula_template(*var_names) if n_dims > 1 else formula_template(var_names[0])
+            # Only keep if it is a genuine closed-form (not a lookup/piecewise alias)
+            _non_poly_markers = ("PiecewiseLinear", "DiscreteLookup", "Lagrange")
+            if not any(m in expr for m in _non_poly_markers):
+                return {"type": "poly", "vars": var_names, "expr": expr, "n": list(d)}
+        except Exception:
+            pass
+
+
+    # --- Lagrange polynomial (small set ≤ 10 elements, numeric, non-complex) ---
+    # Already has a formula_template but it contains "Lagrange" — serialise formula string anyway
+    if formula_template is not None and isinstance(elems, (list, tuple)) and 1 < len(elems) <= 10:
+        try:
+            expr = formula_template(*var_names) if n_dims > 1 else formula_template(var_names[0])
+            if "Lagrange" in expr:
+                # Store as poly with Lagrange expression — eval-able because it uses only
+                # arithmetic on the variable; we keep it as-is.
+                return {"type": "poly", "vars": var_names, "expr": expr, "n": list(d)}
+        except Exception:
+            pass
+
+    # --- Fallback: store raw values ---
+    if isinstance(elems, range):
+        values = [_serialize_ast_value(v) for v in elems]
+    elif isinstance(elems, (list, tuple)):
+        values = [_serialize_ast_value(v) for v in elems]
+    else:
+        values = []
+    return {"type": "set", "values": values, "n": list(d)}
+
+
+def _fn_dict_to_leaf_data(fn: dict) -> Any:
+    """
+    Reconstructs the original elements sequence from a compact function-form descriptor.
+
+    Supported types:
+    - ``"poly"``  : evaluates ``expr`` at each index using ``eval()``
+    - ``"set"``   : restores raw value list
+    - ``"range"`` : legacy — returns a ``range`` object
+    - ``"ap"``    : legacy — reconstructs arithmetic-progression list
+    """
+    t = fn.get("type")
+    n_info = fn.get("n", [1])  # dimension sizes, e.g. [5] or [3, 4]
+    if isinstance(n_info, int):
+        d = (n_info,)
+    else:
+        d = tuple(n_info)
+
+    if t == "poly":
+        var_names = fn.get("vars", ["x_1"])
+        expr = fn.get("expr", "x_1")
+        import itertools as _itertools
+        # Evaluate the polynomial expression at every multi-index combination
+        index_ranges = [range(1, di + 1) for di in d]
+        results = []
+        _safe_ns = {"__builtins__": {}, "abs": abs, "round": round}
+        for idx_tuple in _itertools.product(*index_ranges):
+            local_vars = dict(zip(var_names, idx_tuple))
+            try:
+                val = eval(expr, _safe_ns, local_vars)  # noqa: S307
+                # Convert Fraction-like float back to int when possible
+                if isinstance(val, float) and val.is_integer():
+                    val = int(val)
+            except Exception:
+                val = None
+            results.append(val)
+        # 1-D case: return the flat list directly
+        if len(d) == 1:
+            return results
+        # Multi-dim: return flat list (caller reconstructs via constructor)
+        return results
+
+    # --- Legacy formats (backwards compat) ---
+    elif t == "range":
+        return range(fn["start"], fn["stop"], fn["step"])
+
+    elif t == "ap":
+        start = _deserialize_ast_value(fn["start"])
+        step = _deserialize_ast_value(fn["step"])
+        n = fn["n"] if isinstance(fn["n"], int) else fn["n"][0]
+        if n == 1:
+            return [start]
+        if isinstance(start, (int, Fraction)) and isinstance(step, (int, Fraction)):
+            start_f = Fraction(start)
+            step_f = Fraction(step)
+            values = [start_f + i * step_f for i in range(n)]
+            return [int(v) if v.denominator == 1 else float(v) for v in values]
+        start_f = float(start)
+        step_f = float(step)
+        return [start_f + i * step_f for i in range(n)]
+
+    elif t == "set":
+        return [_deserialize_ast_value(x) for x in fn.get("values", [])]
+
+    return []
+
+
 class UncertainNumber:
     """
     Represents an Uncertain Number U(K) defined strictly via its Canonical Form (f_X, d_X).
@@ -1015,6 +1233,7 @@ class UncertainNumber:
                     else:
                         # Check arithmetic progression — use Fraction for exact precision
                         all_int_or_frac = all(isinstance(v, (int, Fraction)) for v in y_values)
+                        has_complex = any(isinstance(v, complex) for v in y_values)
                         if all_int_or_frac:
                             e0 = Fraction(y_values[0])
                             e_last = Fraction(y_values[-1])
@@ -1023,7 +1242,7 @@ class UncertainNumber:
                                 Fraction(y_values[i]) == e0 + i * step_f
                                 for i in range(n)
                             )
-                        else:
+                        elif not has_complex:
                             step = (float(y_values[-1]) - float(y_values[0])) / (n - 1)
                             is_arithmetic = False
                             if n <= 100:
@@ -1038,6 +1257,9 @@ class UncertainNumber:
                                     abs(float(y_values[-1]) - (float(y_values[0]) + (n - 1) * step)) < 1e-9
                                 )
                             step_f = step
+                        else:
+                            is_arithmetic = False
+                            step_f = 0
 
                         if is_arithmetic:
                             y0 = y_values[0]
@@ -1069,7 +1291,7 @@ class UncertainNumber:
                                 )
                             else:
                                 self._formula_template = lambda v, _y=y0d, _s=s: f"{_y} + ({v} - 1) * {_s}"
-                        elif n <= 10:
+                        elif not has_complex and n <= 10:
                             x_nodes = list(range(1, n + 1))
                             self.f = lagrange_interpolation(x_nodes, y_values)
                             _xn, _yv = x_nodes[:], y_values[:]
@@ -1616,6 +1838,322 @@ class UncertainNumber:
     def s(*args: Any, **kwargs: Any) -> "UncertainNumber":
         return s(*args, **kwargs)
 
+    # ==================== AST SERIALIZATION METHODS ====================
+
+    def to_ast_dict(self) -> dict:
+        """
+        Serializes this UncertainNumber and its recursive AST tree structure to a dictionary.
+        Preserves operations, arithmetic spaces, scenarios, dimensions, and weights.
+        """
+        ast_type = self.ast.get("type", "leaf")
+        data: Dict[str, Any] = {
+            "__class__": self.__class__.__name__,
+            "type": ast_type,
+            "d": list(self.d),
+        }
+
+        # Preserve weights if configured
+        if self.weights is not None:
+            if isinstance(self.weights, dict):
+                data["weights"] = {
+                    "__format__": "pairs",
+                    "items": [
+                        {"value": _serialize_ast_value(k), "weight": _serialize_ast_value(w)}
+                        for k, w in self.weights.items()
+                    ],
+                }
+            elif isinstance(self.weights, (list, tuple)):
+                data["weights"] = {
+                    "__format__": "list",
+                    "items": [_serialize_ast_value(w) for w in self.weights],
+                }
+
+        if ast_type == "leaf":
+            # Store elements as compact function-form instead of raw list
+            data["fn"] = _leaf_to_fn_dict(self)
+
+        elif ast_type == "op":
+            data["operator_symbol"] = self.ast.get("operator_symbol", "+")
+            data["space_type"] = self.ast.get("space_type", "minkowski")
+            left = self.ast.get("left")
+            right = self.ast.get("right")
+            data["left"] = left.to_ast_dict() if hasattr(left, "to_ast_dict") else _serialize_ast_value(left)
+            data["right"] = right.to_ast_dict() if hasattr(right, "to_ast_dict") else _serialize_ast_value(right)
+
+        elif ast_type == "pgr":
+            data["operator_symbol"] = self.ast.get("operator_symbol", "×")
+            data["space_type"] = self.ast.get("space_type", "minkowski")
+            left = self.ast.get("left")
+            right = self.ast.get("right")
+            data["left"] = left.to_ast_dict() if hasattr(left, "to_ast_dict") else _serialize_ast_value(left)
+            data["right"] = right.to_ast_dict() if hasattr(right, "to_ast_dict") else _serialize_ast_value(right)
+
+        elif ast_type == "custom_fn":
+            data["space_type"] = self.ast.get("space_type", "minkowski")
+            if "child" in self.ast:
+                child = self.ast["child"]
+                data["child"] = child.to_ast_dict() if hasattr(child, "to_ast_dict") else _serialize_ast_value(child)
+            if hasattr(self, "elements") and self.elements is not None:
+                data["fn"] = _leaf_to_fn_dict(self)
+
+        else:
+            for k, v in self.ast.items():
+                if k not in data:
+                    if hasattr(v, "to_ast_dict"):
+                        data[k] = v.to_ast_dict()
+                    elif isinstance(v, (str, int, float, bool, list, tuple, dict)):
+                        data[k] = _serialize_ast_value(v)
+
+        return data
+
+    def to_dict(self) -> dict:
+        """Alias for to_ast_dict()."""
+        return self.to_ast_dict()
+
+    def to_json(self, indent: int = 2) -> str:
+        """Serializes the AST tree to a formatted JSON string."""
+        return json.dumps(self.to_ast_dict(), indent=indent, ensure_ascii=False)
+
+    @classmethod
+    def from_ast_dict(cls, data: dict) -> "UncertainNumber":
+        """
+        Reconstructs an UncertainNumber and its lazy AST tree hierarchy from an AST dictionary.
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for AST reconstruction, got {type(data).__name__}")
+
+        ast_type = data.get("type", "leaf")
+        index_domain = tuple(data.get("d", ()))
+
+        # Reconstruct weights
+        weights = None
+        if "weights" in data and data["weights"] is not None:
+            w_data = data["weights"]
+            if isinstance(w_data, dict):
+                fmt = w_data.get("__format__")
+                if fmt == "pairs":
+                    weights = {}
+                    for item in w_data.get("items", []):
+                        k = _deserialize_ast_value(item["value"])
+                        w = _deserialize_ast_value(item["weight"])
+                        weights[k] = w
+                elif fmt == "list":
+                    weights = [_deserialize_ast_value(x) for x in w_data.get("items", [])]
+            elif isinstance(w_data, list):
+                weights = [_deserialize_ast_value(x) for x in w_data]
+
+        if ast_type == "leaf":
+            # Support new compact "fn" format and legacy "elements" format
+            if "fn" in data:
+                elems = _fn_dict_to_leaf_data(data["fn"])
+            else:
+                # Legacy backwards-compat: old "elements" key
+                elems_raw = data.get("elements", [])
+                if isinstance(elems_raw, dict) and elems_raw.get("__type__") == "range":
+                    elems = _deserialize_ast_value(elems_raw)
+                elif isinstance(elems_raw, list):
+                    elems = [_deserialize_ast_value(x) for x in elems_raw]
+                else:
+                    elems = _deserialize_ast_value(elems_raw)
+            return cls(elems, weights=weights)
+
+        elif ast_type == "op":
+            op_sym = data.get("operator_symbol", "+")
+            space_type = data.get("space_type", "minkowski")
+            left_dict = data.get("left")
+            right_dict = data.get("right")
+
+            left_unc = cls.from_ast_dict(left_dict) if isinstance(left_dict, dict) else _deserialize_ast_value(left_dict)
+            right_unc = cls.from_ast_dict(right_dict) if isinstance(right_dict, dict) else _deserialize_ast_value(right_dict)
+
+            if not isinstance(left_unc, cls):
+                left_unc = cls([left_unc])
+            if not isinstance(right_unc, cls):
+                right_unc = cls([right_unc])
+
+            op_fn = _BINARY_OPS.get(op_sym, lambda a, b: a + b)
+
+            if space_type == "pointwise":
+                new_d = left_unc.d if left_unc.d == right_unc.d else (left_unc.d if right_unc.d == (1,) else right_unc.d)
+                if not new_d:
+                    new_d = index_domain if index_domain else left_unc.d
+            else:
+                new_d = left_unc.d + right_unc.d
+                if not new_d:
+                    new_d = index_domain
+
+            ast_node = {
+                "type": "op",
+                "left": left_unc,
+                "right": right_unc,
+                "operator_fn": op_fn,
+                "operator_symbol": op_sym,
+                "space_type": space_type,
+            }
+
+            res = cls(
+                generative_fn=lambda idx: res.evaluate_at_index(idx),
+                index_domain=new_d,
+                ast_node=ast_node,
+                weights=weights,
+            )
+            return res
+
+        elif ast_type == "pgr":
+            left_dict = data.get("left")
+            right_dict = data.get("right")
+            left_unc = cls.from_ast_dict(left_dict) if isinstance(left_dict, dict) else _deserialize_ast_value(left_dict)
+            right_unc = cls.from_ast_dict(right_dict) if isinstance(right_dict, dict) else _deserialize_ast_value(right_dict)
+            space_type = data.get("space_type", "minkowski")
+            try:
+                from algebra.UncertainGraph import UncertainGraph
+                ast_node = {
+                    "type": "pgr",
+                    "left": left_unc,
+                    "right": right_unc,
+                    "input_ast": left_unc.ast,
+                    "output_ast": right_unc.ast,
+                    "space_type": space_type,
+                    "operator_symbol": "×",
+                }
+                if space_type == "pointwise":
+                    new_d = left_unc.d
+                    gen_fn = lambda idx: (left_unc.evaluate_at_index(idx), right_unc.evaluate_at_index(idx))
+                else:
+                    new_d = left_unc.d + right_unc.d
+                    in_dim = len(left_unc.d)
+                    def gen_fn(idx_tuple):
+                        if not isinstance(idx_tuple, tuple):
+                            idx_tuple = (idx_tuple,)
+                        return (left_unc.evaluate_at_index(idx_tuple[:in_dim]), right_unc.evaluate_at_index(idx_tuple[in_dim:]))
+
+                res = UncertainGraph.__new__(UncertainGraph)
+                res.input = left_unc
+                res.output = right_unc
+                res.space_type = space_type
+                res._is_computed = False
+                res._cached_points = None
+                cls.__init__(res, generative_fn=gen_fn, index_domain=new_d, ast_node=ast_node, weights=weights)
+                return res
+            except Exception:
+                pass
+
+        if "fn" in data:
+            elems = _fn_dict_to_leaf_data(data["fn"])
+            return cls(elems, weights=weights)
+
+        if "elements" in data:  # legacy
+            elems = [_deserialize_ast_value(x) for x in data["elements"]]
+            return cls(elems, weights=weights)
+
+        return cls([0], weights=weights)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "UncertainNumber":
+        """Alias for from_ast_dict()."""
+        return cls.from_ast_dict(data)
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "UncertainNumber":
+        """Reconstructs an UncertainNumber and its AST hierarchy from a JSON string."""
+        data = json.loads(json_str)
+        return cls.from_ast_dict(data)
+
+    def save(
+        self,
+        filepath: Union[str, os.PathLike, Any],
+        format: Optional[str] = None,
+        indent: int = 2,
+    ) -> None:
+        """
+        Saves this UncertainNumber and its AST tree structure to a file.
+
+        Supported formats:
+        - 'json' (default): Human-readable JSON containing full AST structure.
+        - 'pickle' / 'pkl': Python binary pickle format.
+
+        Args:
+            filepath: Path to the target file or a writable file-like object.
+            format: 'json' or 'pickle'. If None, inferred from file extension.
+            indent: Indentation level for JSON formatting (default 2).
+        """
+        if format is None:
+            if isinstance(filepath, (str, os.PathLike)):
+                ext = str(filepath).lower()
+                if ext.endswith(".pkl") or ext.endswith(".pickle"):
+                    format = "pickle"
+                else:
+                    format = "json"
+            else:
+                format = "json"
+
+        fmt = format.lower()
+        if fmt in ("pickle", "pkl"):
+            ast_dict = self.to_ast_dict()
+            if hasattr(filepath, "write"):
+                pickle.dump(ast_dict, filepath)
+            else:
+                p = Path(filepath)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with open(p, "wb") as f:
+                    pickle.dump(ast_dict, f)
+        elif fmt == "json":
+            if hasattr(filepath, "write"):
+                json.dump(self.to_ast_dict(), filepath, indent=indent, ensure_ascii=False)
+            else:
+                p = Path(filepath)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with open(p, "w", encoding="utf-8") as f:
+                    json.dump(self.to_ast_dict(), f, indent=indent, ensure_ascii=False)
+        else:
+            raise ValueError(f"Unsupported format '{format}'. Expected 'json' or 'pickle'.")
+
+    @classmethod
+    def load(
+        cls,
+        filepath: Union[str, os.PathLike, Any],
+        format: Optional[str] = None,
+    ) -> "UncertainNumber":
+        """
+        Loads an UncertainNumber and reconstructs its lazy AST tree from a file.
+
+        Args:
+            filepath: Path to the source file or a readable file-like object.
+            format: 'json' or 'pickle'. If None, inferred from file extension.
+
+        Returns:
+            The reconstructed UncertainNumber instance with AST intact.
+        """
+        if format is None:
+            if isinstance(filepath, (str, os.PathLike)):
+                ext = str(filepath).lower()
+                if ext.endswith(".pkl") or ext.endswith(".pickle"):
+                    format = "pickle"
+                else:
+                    format = "json"
+            else:
+                format = "json"
+
+        fmt = format.lower()
+        if fmt in ("pickle", "pkl"):
+            if hasattr(filepath, "read"):
+                data = pickle.load(filepath)
+            else:
+                with open(filepath, "rb") as f:
+                    data = pickle.load(f)
+            if isinstance(data, dict):
+                return cls.from_ast_dict(data)
+            return data
+        elif fmt == "json":
+            if hasattr(filepath, "read"):
+                data = json.load(filepath)
+            else:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            return cls.from_ast_dict(data)
+        else:
+            raise ValueError(f"Unsupported format '{format}'. Expected 'json' or 'pickle'.")
+
 
 # ==================== MODULE-LEVEL CONVENIENCE FUNCTIONS ====================
 
@@ -2152,4 +2690,45 @@ def approximate(unc: Any, n: int = 0) -> UncertainNumber:
 def approx(unc: Any, n: int = 0) -> UncertainNumber:
     """Module-level alias for approximate."""
     return approximate(unc, n)
+
+
+def save(
+    first: Any,
+    second: Any = None,
+    format: Optional[str] = None,
+    indent: int = 2,
+) -> None:
+    """
+    Saves an UncertainNumber and its AST tree structure to a file.
+
+    Usage:
+        save(X, "x.json")
+        save("x.json", X)
+        X.save("x.json")
+    """
+    if second is not None and isinstance(first, (str, os.PathLike)) and not isinstance(second, (str, os.PathLike)):
+        filepath = first
+        unc = second
+    else:
+        unc = first
+        filepath = second
+
+    if not isinstance(unc, UncertainNumber):
+        unc = _to_unc(unc)
+    unc.save(filepath, format=format, indent=indent)
+
+
+def load(
+    filepath: Union[str, os.PathLike, Any],
+    format: Optional[str] = None,
+) -> UncertainNumber:
+    """
+    Loads an UncertainNumber from an AST file.
+
+    Usage:
+        X = load("x.json")
+        X = UncertainNumber.load("x.json")
+    """
+    return UncertainNumber.load(filepath, format=format)
+
 
