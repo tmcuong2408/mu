@@ -3,15 +3,63 @@ import sys
 from typing import Any, Optional, Tuple, Union, List, Dict
 from fractions import Fraction
 
+def _is_notebook() -> bool:
+    """Checks if running inside a Jupyter Notebook / Lab / Colab."""
+    try:
+        from IPython import get_ipython
+        ip = get_ipython()
+        if ip is None:
+            return False
+        shell = ip.__class__.__name__
+        if shell in ("ZMQInteractiveShell", "Shell"):
+            return True
+        if "IPKernelApp" in getattr(ip, "config", {}):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _can_show_gui(fig: Any) -> bool:
+    """Checks whether the figure can actually be shown in a native GUI window."""
+    try:
+        import matplotlib
+        backend = matplotlib.get_backend().lower()
+        non_gui = {"agg", "cairo", "pdf", "pgf", "ps", "svg", "template"}
+        if backend in non_gui or "inline" in backend:
+            return False
+
+        if sys.platform.startswith("linux"):
+            if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                return False
+
+        manager = getattr(fig.canvas, "manager", None)
+        if manager is None:
+            return False
+
+        from matplotlib.backend_bases import FigureManagerBase
+        if type(manager) is FigureManagerBase:
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
 def _get_plt():
     """Lazily configures and imports matplotlib.pyplot."""
-    _has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    if not _has_display:
-        try:
-            import matplotlib
-            matplotlib.use("Agg")
-        except Exception:
-            pass
+    _has_display = bool(
+        os.environ.get("DISPLAY")
+        or os.environ.get("WAYLAND_DISPLAY")
+        or sys.platform in ("win32", "darwin")
+    )
+    if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        if not _is_notebook():
+            try:
+                import matplotlib
+                matplotlib.use("Agg")
+            except Exception:
+                pass
     import matplotlib.pyplot as plt
     return plt, _has_display
 
@@ -177,8 +225,8 @@ def draw(
     # Title & Labels
     default_title = "Graph of Uncertain Function $pgr_f(A) = A \\times f(A)$"
     ax.set_title(title or default_title, fontsize=13, fontweight="bold", pad=12, color="#0f172a")
-    ax.set_xlabel(xlabel, fontsize=11, fontweight="medium", color="#1e293b")
-    ax.set_ylabel(ylabel, fontsize=11, fontweight="medium", color="#1e293b")
+    ax.set_xlabel(xlabel, fontsize=11, fontweight="normal", color="#1e293b")
+    ax.set_ylabel(ylabel, fontsize=11, fontweight="normal", color="#1e293b")
 
     # Spines styling
     for spine in ax.spines.values():
@@ -195,17 +243,31 @@ def draw(
 
     # Display or fallback
     if show:
-        if _has_display:
+        if _is_notebook():
             try:
-                plt.show()
+                from IPython.display import display
+                display(fig)
+            except Exception:
+                try:
+                    plt.show()
+                except Exception:
+                    print(draw_ascii(graph_obj, title=title))
+        elif _can_show_gui(fig):
+            try:
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("error", message=".*non-interactive.*")
+                    plt.show()
             except Exception:
                 print(draw_ascii(graph_obj, title=title))
         else:
-            # Print ASCII visualization in terminal when headless
+            # Print ASCII visualization in terminal when headless / non-GUI (e.g. WSL terminal without Tk/Qt)
             print(draw_ascii(graph_obj, title=title))
 
     if return_fig:
         return fig, ax
+    elif not _is_notebook() and not _can_show_gui(fig):
+        plt.close(fig)
     return None
 
 

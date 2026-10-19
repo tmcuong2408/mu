@@ -146,3 +146,18 @@ class TestDrawFunctions:
         ast_str = draw_ast(g, as_text=False)
         assert "AST Hierarchy:" in ast_str
         assert "[pgr]" in ast_str
+
+    def test_draw_show_default_headless_no_warnings(self, capsys):
+        """Tests that calling draw(g, show=True) does not emit UserWarning or font warnings."""
+        import warnings
+        X = UncertainNumber({1, 2})
+        g = pgr(lambda x: x + 1, X)
+        with warnings.catch_warnings(record=True) as recorded_warnings:
+            warnings.simplefilter("always")
+            draw(g, show=True)
+            for w in recorded_warnings:
+                assert "is non-interactive, and thus cannot be shown" not in str(w.message)
+                assert "Failed to find font weight" not in str(w.message)
+        captured = capsys.readouterr()
+        assert "Total Scenarios:" in captured.out
+
