@@ -1,4 +1,4 @@
-# MU
+# Mathematics of Uncertainty Framework
 Mathematics of Uncertainty
 
 Trần, M. C. (2026). Extended logic and mathematics of uncertainty. <br/>
