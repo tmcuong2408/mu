@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use("Agg", force=True)
+import matplotlib.pyplot as plt
 import pytest
 from arithmetic import *
 from algebra import (
@@ -12,6 +15,14 @@ from algebra import (
     draw_ascii,
     draw_ast,
 )
+
+
+@pytest.fixture(autouse=True)
+def prevent_gui_plots(monkeypatch):
+    """Prevents interactive plot windows from opening and cleans up figures."""
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
+    yield
+    plt.close("all")
 
 
 class TestUncertainGraphLazyAST:
