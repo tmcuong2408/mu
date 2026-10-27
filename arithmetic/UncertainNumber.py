@@ -1085,6 +1085,13 @@ def _leaf_to_fn_dict(unc: Any) -> dict:
         values = [_serialize_ast_value(v) for v in elems]
     elif isinstance(elems, (list, tuple)):
         values = [_serialize_ast_value(v) for v in elems]
+    elif elems is None and hasattr(unc, "evaluate_at_index") and n_total <= 50000:
+        try:
+            import itertools as _itertools
+            index_ranges = [range(1, di + 1) for di in d]
+            values = [_serialize_ast_value(unc.evaluate_at_index(idx)) for idx in _itertools.product(*index_ranges)]
+        except Exception:
+            values = []
     else:
         values = []
     return {"type": "set", "values": values, "n": list(d)}
@@ -1869,7 +1876,7 @@ class UncertainNumber:
                 }
 
         if ast_type == "leaf":
-            # Store elements as compact function-form instead of raw list
+            # Store elements as compact function-form instead of raw list (supports infinite/arbitrarily large domains)
             data["fn"] = _leaf_to_fn_dict(self)
 
         elif ast_type == "op":
@@ -1943,10 +1950,53 @@ class UncertainNumber:
                 weights = [_deserialize_ast_value(x) for x in w_data]
 
         if ast_type == "leaf":
-            # Support new compact "fn" format and legacy "elements" format
+            # Support compact "fn" format and legacy "elements" format
             if "fn" in data:
-                elems = _fn_dict_to_leaf_data(data["fn"])
-            else:
+                fn_info = data["fn"]
+                t = fn_info.get("type")
+                n_info = fn_info.get("n", list(index_domain) if index_domain else [1])
+                d_tuple = tuple(n_info) if isinstance(n_info, (list, tuple)) else (n_info,)
+                n_total = 1
+                for di in d_tuple:
+                    n_total *= di
+
+                if t == "poly" and n_total > 50000:
+                    var_names = fn_info.get("vars", ["x_1"])
+                    expr = fn_info.get("expr", "x_1")
+                    _safe_ns = {"__builtins__": {}, "abs": abs, "round": round}
+
+                    def _poly_f(x, _vars=var_names, _expr=expr, _ns=_safe_ns):
+                        idx_tuple = x if isinstance(x, tuple) else (x,)
+                        local_vars = dict(zip(_vars, idx_tuple))
+                        try:
+                            val = eval(_expr, _ns, local_vars)  # noqa: S307
+                            if isinstance(val, float) and val.is_integer():
+                                return int(val)
+                            return val
+                        except Exception:
+                            return None
+
+                    def _poly_template(*v_in, _vars=var_names, _expr=expr):
+                        template = _expr
+                        for old_v, new_v in zip(_vars, v_in):
+                            template = template.replace(old_v, str(new_v))
+                        return template
+
+                    ast_node = {
+                        "type": "leaf",
+                        "formula_template": _poly_template,
+                    }
+                    return cls(
+                        generative_fn=_poly_f,
+                        index_domain=d_tuple,
+                        ast_node=ast_node,
+                        weights=weights,
+                    )
+
+                elems = _fn_dict_to_leaf_data(fn_info)
+                return cls(elems, weights=weights)
+
+            elif "elements" in data:
                 # Legacy backwards-compat: old "elements" key
                 elems_raw = data.get("elements", [])
                 if isinstance(elems_raw, dict) and elems_raw.get("__type__") == "range":
@@ -1955,7 +2005,9 @@ class UncertainNumber:
                     elems = [_deserialize_ast_value(x) for x in elems_raw]
                 else:
                     elems = _deserialize_ast_value(elems_raw)
-            return cls(elems, weights=weights)
+                return cls(elems, weights=weights)
+
+            return cls([0], weights=weights)
 
         elif ast_type == "op":
             op_sym = data.get("operator_symbol", "+")
@@ -2038,12 +2090,18 @@ class UncertainNumber:
             except Exception:
                 pass
 
-        if "fn" in data:
-            elems = _fn_dict_to_leaf_data(data["fn"])
+        if "elements" in data:
+            elems_raw = data.get("elements", [])
+            if isinstance(elems_raw, dict) and elems_raw.get("__type__") == "range":
+                elems = _deserialize_ast_value(elems_raw)
+            elif isinstance(elems_raw, list):
+                elems = [_deserialize_ast_value(x) for x in elems_raw]
+            else:
+                elems = _deserialize_ast_value(elems_raw)
             return cls(elems, weights=weights)
 
-        if "elements" in data:  # legacy
-            elems = [_deserialize_ast_value(x) for x in data["elements"]]
+        if "fn" in data:
+            elems = _fn_dict_to_leaf_data(data["fn"])
             return cls(elems, weights=weights)
 
         return cls([0], weights=weights)

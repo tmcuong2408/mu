@@ -27,7 +27,8 @@ class TestSaveLoadAST:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
         assert data["type"] == "leaf"
-        assert data["elements"] == [1, 2, 3, 4]
+        assert "fn" in data
+        assert "elements" not in data
         assert data["d"] == [4]
 
         # Load back
@@ -81,9 +82,11 @@ class TestSaveLoadAST:
         assert ast_json["operator_symbol"] == "+"
         assert ast_json["space_type"] == "minkowski"
         assert ast_json["left"]["type"] == "leaf"
-        assert ast_json["left"]["elements"] == [1, 2]
+        assert "fn" in ast_json["left"]
+        assert "elements" not in ast_json["left"]
         assert ast_json["right"]["type"] == "leaf"
-        assert ast_json["right"]["elements"] == [3, 4]
+        assert "fn" in ast_json["right"]
+        assert "elements" not in ast_json["right"]
 
         # Load back
         C_loaded = load(filepath)
@@ -201,3 +204,43 @@ class TestSaveLoadAST:
 
         assert load(p1).to_set() == {10, 20}
         assert load(p2).to_set() == {10, 20}
+
+    def test_save_load_generative_leaf(self, tmp_path):
+        """Tests saving and loading a leaf node created via generative_fn."""
+        filepath = tmp_path / "gen_leaf.json"
+        X = UncertainNumber(
+            generative_fn=lambda idx: idx * 2 if not isinstance(idx, tuple) else idx[0] * 2,
+            index_domain=(4,),
+            ast_node={"type": "leaf"},
+        )
+        save(X, filepath)
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["type"] == "leaf"
+        assert "fn" in data
+        assert "elements" not in data
+
+        loaded = load(filepath)
+        assert loaded.to_set() == {2, 4, 6, 8}
+
+    def test_save_load_large_trillion_scale(self, tmp_path):
+        """Tests saving and loading 10^9 scenarios without storing elements or expanding RAM."""
+        filepath = tmp_path / "billion.json"
+        A = UncertainNumber(range(1, 1_000_000_001))
+        save(A, filepath)
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["type"] == "leaf"
+        assert "fn" in data
+        assert "elements" not in data
+        assert data["fn"]["type"] == "poly"
+        assert data["d"] == [1_000_000_000]
+
+        # Loading must be instantaneous and O(1) RAM without expanding 1 billion elements
+        loaded = load(filepath)
+        assert loaded.d == (1_000_000_000,)
+        assert loaded.evaluate_at_index((1,)) == 1
+        assert loaded.evaluate_at_index((500_000_000,)) == 500_000_000
+        assert loaded.evaluate_at_index((1_000_000_000,)) == 1_000_000_000

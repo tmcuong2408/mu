@@ -244,3 +244,30 @@ def benchmark_trillion_scale():
     print("🎉 RESULT: PERFECT PASS! Engine meets O(1) RAM & O(k) TIME standards!")
     
 benchmark_trillion_scale()
+```
+
+## Save and Load AST Expressions (`save`, `load`)
+
+Uncertain numbers and their full lazy AST operation trees can be serialized to JSON or Pickle. To support massive scale and potentially infinite domains without memory exhaustion, leaf nodes are serialized as compact functional descriptors (`fn`) rather than expanding raw elements:
+
+```python
+from arithmetic import s, save, load
+
+# Construct an AST tree expression
+A = s(1, 2, 3, 4)
+B = s(10, 20)
+C = (A + B) * A
+
+# 1. Save to JSON (O(1) storage space, stores compact 'fn' expressions)
+save(C, "expression.json")
+# Alternatively: C.save("expression.json")
+
+# 2. Reconstruct lazy AST tree from file
+C_loaded = load("expression.json")
+# Alternatively: UncertainNumber.load("expression.json")
+
+# AST structure and lazy evaluations remain intact
+print(C_loaded.ast["type"])              # 'op'
+print(C_loaded.evaluate_at_index((1, 1, 1)))  # (1 + 10) * 1 = 11
+print(C_loaded.to_set())
+```
