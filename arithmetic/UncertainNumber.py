@@ -1,4 +1,5 @@
 import os
+import inspect
 import json
 import pickle
 from pathlib import Path
@@ -1163,6 +1164,79 @@ def _fn_dict_to_leaf_data(fn: dict) -> Any:
     return []
 
 
+def _adapt_canonical_fn(fn: Callable, d: Tuple[int, ...]) -> Callable:
+    """
+    Wraps a generative or multivariable function f given index domain d
+    so that it can be invoked seamlessly with multiple arguments f(x1, x2, ...),
+    with a single tuple/list f((x1, x2, ...)), or with a scalar f(x1) when 1D.
+    """
+    if hasattr(fn, "__wrapped__"):
+        fn = getattr(fn, "__wrapped__")
+
+    dim = len(d)
+    style = "AUTO"
+    try:
+        sig = inspect.signature(fn)
+        params = list(sig.parameters.values())
+        has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+        pos = [
+            p for p in params
+            if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        req = [p for p in pos if p.default is inspect.Parameter.empty]
+        if has_var_pos:
+            style = "UNPACK"
+        elif dim > 1:
+            if len(req) <= dim <= len(pos):
+                style = "UNPACK"
+            elif len(req) <= 1 <= len(pos):
+                style = "TUPLE"
+        elif dim == 1:
+            if len(req) <= 1 <= len(pos):
+                style = "SCALAR"
+    except (ValueError, TypeError):
+        style = "AUTO"
+
+    def wrapped(*args):
+        if len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, (tuple, list)):
+                idx_tuple = tuple(arg)
+            else:
+                idx_tuple = (arg,)
+        else:
+            idx_tuple = args
+
+        if style == "UNPACK":
+            return fn(*idx_tuple)
+        elif style == "TUPLE":
+            return fn(idx_tuple)
+        elif style == "SCALAR":
+            try:
+                return fn(idx_tuple[0] if idx_tuple else None)
+            except (TypeError, KeyError, IndexError):
+                return fn(idx_tuple)
+        else:
+            if dim > 1:
+                try:
+                    return fn(*idx_tuple)
+                except TypeError:
+                    return fn(idx_tuple)
+            elif dim == 1:
+                try:
+                    return fn(idx_tuple[0] if idx_tuple else None)
+                except TypeError:
+                    return fn(idx_tuple)
+            else:
+                try:
+                    return fn(*idx_tuple)
+                except TypeError:
+                    return fn(idx_tuple)
+
+    wrapped.__wrapped__ = fn
+    return wrapped
+
+
 class UncertainNumber:
     """
     Represents an Uncertain Number U(K) defined strictly via its Canonical Form (f_X, d_X).
@@ -1171,13 +1245,47 @@ class UncertainNumber:
 
     def __init__(
         self,
-        data: Union[List[Numeric], Set[Numeric], None] = None,
+        data: Union[List[Numeric], Set[Numeric], range, Callable, None] = None,
         generative_fn: Union[Callable, None] = None,
-        index_domain: Union[Tuple[int, ...], None] = None,
+        index_domain: Union[Tuple[int, ...], List[int], int, None] = None,
         ast_node: Union[dict, None] = None,
         weights: Union[dict, list, tuple, Callable, None] = None,
+        *,
+        f: Union[Callable, None] = None,
+        d: Union[Tuple[int, ...], List[int], int, None] = None,
     ):
         self.weights = weights
+
+        # Support positional construction UncertainNumber(f, d, ...)
+        if callable(data):
+            if f is None:
+                f = data
+            if d is None:
+                if generative_fn is not None:
+                    d = generative_fn
+                elif index_domain is not None:
+                    d = index_domain
+            data = None
+            generative_fn = None
+            index_domain = None
+
+        if f is not None:
+            generative_fn = f
+        if d is not None:
+            index_domain = d
+
+        if index_domain is not None:
+            if isinstance(index_domain, int):
+                index_domain = (index_domain,)
+            else:
+                try:
+                    index_domain = tuple(index_domain)
+                except TypeError:
+                    raise TypeError(f"Index domain 'd' must be a tuple, list, or int, got {type(index_domain).__name__}")
+            for di in index_domain:
+                if not isinstance(di, int) or di < 0:
+                    raise ValueError(f"Index domain elements must be non-negative integers, got {di}")
+
         if data is not None:
             if isinstance(data, range):
                 n = len(data)
@@ -1331,13 +1439,40 @@ class UncertainNumber:
         elif generative_fn is not None or index_domain is not None or ast_node is not None:
             self.d = tuple(index_domain) if index_domain is not None else ()
             self.ast = ast_node if ast_node is not None else {"type": "custom_fn"}
-            self.f = generative_fn if generative_fn is not None else (lambda idx: self.evaluate_at_index(idx))
+            if generative_fn is not None:
+                self.f = _adapt_canonical_fn(generative_fn, self.d)
+            else:
+                self.f = lambda idx: self.evaluate_at_index(idx)
             self._formula_template = ast_node.get("formula_template") if ast_node else None
 
         else:
             raise ValueError(
                 "Must provide either raw numeric data OR a generative function 'f' with index domain tuple 'd'."
             )
+
+    @classmethod
+    def from_canonical(
+        cls,
+        f: Callable,
+        d: Union[Tuple[int, ...], List[int], int],
+        weights: Union[dict, list, tuple, Callable, None] = None,
+    ) -> "UncertainNumber":
+        """
+        Creates an UncertainNumber directly from its Canonical Form (f, d),
+        where f is a multivariable function and d is the index domain tuple.
+        """
+        d_tuple = (d,) if isinstance(d, int) else tuple(d)
+        return cls(f=f, d=d_tuple, weights=weights)
+
+    @classmethod
+    def from_fd(
+        cls,
+        f: Callable,
+        d: Union[Tuple[int, ...], List[int], int],
+        weights: Union[dict, list, tuple, Callable, None] = None,
+    ) -> "UncertainNumber":
+        """Shorthand alias for from_canonical(f, d)."""
+        return cls.from_canonical(f=f, d=d, weights=weights)
 
     def evaluate_at_index(self, index_key: Any) -> Any:
         """Evaluates the generative function f_X at a specific index key or index tuple."""

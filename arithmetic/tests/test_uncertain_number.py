@@ -261,3 +261,99 @@ class TestUncertainNumberApproximation:
     def test_approximate_empty(self):
         u = UncertainNumber(set())
         assert u.approximate(2).to_set() == set()
+
+
+class TestUncertainNumberCanonicalInit:
+    def test_init_with_keyword_f_and_d_multivariable(self):
+        # f is a multivariable function taking 2 variables (x1, x2)
+        u = UncertainNumber(f=lambda x1, x2: x1 + 2 * x2, d=(2, 3))
+        assert u.d == (2, 3)
+        assert len(u) == 6
+        # Scenarios: (1,1)->3, (1,2)->5, (1,3)->7, (2,1)->4, (2,2)->6, (2,3)->8
+        assert u.to_set() == {3, 4, 5, 6, 7, 8}
+        assert u[0] == 3  # (1, 1)
+        assert u[(1, 2)] == 5
+        assert u[(2, 3)] == 8
+
+    def test_init_with_positional_f_and_d(self):
+        # f and d passed positionally: UncertainNumber(f, d)
+        u = UncertainNumber(lambda x, y: x * y, (3, 2))
+        assert u.d == (3, 2)
+        assert len(u) == 6
+        assert u.to_set() == {1, 2, 3, 4, 6}
+
+    def test_from_canonical_and_from_fd(self):
+        u1 = UncertainNumber.from_canonical(lambda x, y: x - y, (2, 2))
+        u2 = UncertainNumber.from_fd(lambda x, y: x - y, (2, 2))
+        assert u1.d == (2, 2)
+        assert u2.d == (2, 2)
+        assert u1.to_set() == u2.to_set() == {0, -1, 1}
+
+    def test_direct_function_evaluation_styles(self):
+        u = UncertainNumber(f=lambda x1, x2: x1 + 10 * x2, d=(2, 3))
+        # Direct call with unpacked arguments
+        assert u.f(1, 2) == 21
+        # Direct call with single tuple argument
+        assert u.f((1, 2)) == 21
+        # evaluate_at_index
+        assert u.evaluate_at_index((1, 2)) == 21
+        assert u.evaluate_at_index([1, 2]) == 21
+
+    def test_tuple_parameter_function(self):
+        # Multivariable function defined with a single tuple parameter idx
+        u = UncertainNumber(f=lambda idx: idx[0] ** 2 + idx[1], d=(3, 2))
+        assert u.f(2, 1) == 5
+        assert u.f((2, 1)) == 5
+        assert u[(2, 1)] == 5
+        assert u.to_set() == {2, 3, 5, 6, 10, 11}
+
+    def test_varargs_function(self):
+        # Function taking *args
+        u = UncertainNumber(f=lambda *args: sum(args), d=(2, 2, 2))
+        assert u.d == (2, 2, 2)
+        assert len(u) == 8
+        assert u.f(1, 2, 2) == 5
+        assert u.f((1, 2, 2)) == 5
+        assert min(u.to_set()) == 3  # (1, 1, 1)
+        assert max(u.to_set()) == 6  # (2, 2, 2)
+
+    def test_1d_canonical_function(self):
+        # 1D with scalar argument
+        u1 = UncertainNumber(f=lambda x: 3 * x + 1, d=(4,))
+        assert u1.to_set() == {4, 7, 10, 13}
+        assert u1.f(2) == 7
+        assert u1.f((2,)) == 7
+
+        # 1D with integer d (auto-converted to tuple (3,))
+        u2 = UncertainNumber(f=lambda idx: idx[0] * 5, d=3)
+        assert u2.d == (3,)
+        assert u2.to_set() == {5, 10, 15}
+
+    def test_canonical_with_arithmetic_spaces(self):
+        from arithmetic import Arithmetic
+        A = UncertainNumber(f=lambda x, y: x + y, d=(2, 2))  # {2, 3, 4}
+        B = UncertainNumber(f=lambda z: 10 * z, d=(2,))       # {10, 20}
+
+        # Minkowski space addition
+        C_m = Arithmetic.add(A, B, space="m")
+        assert C_m.d == (2, 2, 2)
+        assert C_m.to_set() == {12, 13, 14, 22, 23, 24}
+
+        # Pointwise space addition
+        C_pw = Arithmetic.add(A, A, space="pw")
+        assert C_pw.d == (2, 2)
+        assert C_pw.to_set() == {4, 6, 8}
+
+    def test_canonical_weak_relation(self):
+        A = UncertainNumber(f=lambda x: x, d=(2,))
+        B = UncertainNumber(f=lambda x: x, d=(2,))
+        assert A.mu("<=", B) == 0.75
+
+    def test_invalid_domain_raises(self):
+        with pytest.raises(ValueError):
+            UncertainNumber(f=lambda x: x, d=(-1,))
+        with pytest.raises(ValueError):
+            UncertainNumber(f=lambda x: x, d=(2, "invalid"))
+        with pytest.raises(TypeError):
+            UncertainNumber(f=lambda x: x, d=object())
+

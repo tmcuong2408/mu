@@ -67,6 +67,37 @@ print(f"U.approximate(2) = {U_approx.approximate(2)}")  # {123/100, 68/25}_u
 print(f"round(U, 2)       = {round(U_approx, 2)}")       # Native Python round()
 ```
 
+## Canonical Form Initialization $(f, d)$
+
+An uncertain number $U(K)$ can be constructed directly from its Canonical Form $(f_X, d_X)$, where $f$ is a multivariable generative function and $d = (n_1, \ldots, n_k)$ is the index domain tuple.
+
+```python
+from arithmetic import UncertainNumber
+
+# 1. Direct initialization with keyword arguments f and d
+# f can be a multivariable function: f(x1, x2)
+U1 = UncertainNumber(f=lambda x1, x2: x1 + 2 * x2, d=(2, 3))
+print(f"U1 = {U1}")                   # {3, 4, 5, 6, 7, 8}_u
+print(f"Domain d = {U1.d}")           # (2, 3)
+print(f"Total scenarios = {len(U1)}") # 6
+
+# 2. Positional initialization UncertainNumber(f, d)
+U2 = UncertainNumber(lambda x, y: x * y, (3, 2))
+print(f"U2 = {U2}")                   # {1, 2, 3, 4, 6}_u
+
+# 3. Using factory classmethods
+U3 = UncertainNumber.from_canonical(lambda x, y: x - y, (2, 2))
+# or shorthand alias:
+U4 = UncertainNumber.from_fd(lambda x, y: x - y, (2, 2))
+print(f"U3 = {U3}")                   # {-1, 0, 1}_u
+
+# 4. Evaluation flexibility: calls support unpacked arguments or tuples
+print(U1.f(1, 2))                     # 5
+print(U1.f((1, 2)))                   # 5
+print(U1[(1, 2)])                     # 5
+print(U1[0])                          # 3 (linear odometer flat index)
+```
+
 ## Functional Space Operators: `pw`, `epw`, `m`, `em`
 
 The `pw`, `epw`, `m`, `em` functions support **two calling styles**:
