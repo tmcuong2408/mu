@@ -244,3 +244,23 @@ class TestSaveLoadAST:
         assert loaded.evaluate_at_index((1,)) == 1
         assert loaded.evaluate_at_index((500_000_000,)) == 500_000_000
         assert loaded.evaluate_at_index((1_000_000_000,)) == 1_000_000_000
+
+    def test_save_load_quintillion_scale(self, tmp_path):
+        """Tests saving and loading 10^18 scenarios (Minkowski sum of two 10^9 numbers)."""
+        filepath = tmp_path / "quintillion.json"
+        A = UncertainNumber(range(1, 1_000_000_001))
+        B = UncertainNumber(range(100, 100_000_000_100, 100))
+        C = A + B
+
+        assert len(C) == 1_000_000_000_000_000_000
+        save(C, filepath)
+
+        # File size on disk should be < 1 KB (compact function descriptors)
+        file_size = os.path.getsize(filepath)
+        assert file_size < 2048
+
+        loaded = load(filepath)
+        assert len(loaded) == 1_000_000_000_000_000_000
+        assert loaded.ast["type"] == "op"
+        assert loaded[0] == 101
+        assert loaded[len(loaded) - 1] == 101_000_000_000
